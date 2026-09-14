@@ -4,7 +4,7 @@ import random
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Iterator
 from io import BytesIO
-from typing import IO, Any
+from typing import IO, Any, Sequence
 
 import joblib
 
@@ -245,6 +245,10 @@ class Sink(ABC):
         """
         pass
 
+    def put_trials(self, trials: Sequence[Trial]) -> None:
+        for trial in trials:
+            self.put_trial(trial)
+
 
 class Source(ABC):
     """Abstract base class representing a read-only source for experimental trials."""
@@ -443,6 +447,10 @@ class CopyingMultiSink(Sink):
         for comp in self._sinks:
             comp.put_trial(trial)
 
+    def put_trials(self, trials: Sequence[Trial]) -> None:
+        for comp in self._sinks:
+            comp.put_trials(trials)
+
 
 class RandomMultiSink(Sink):
     """A trial sink that records each trial to a single, randomly chosen component sink."""
@@ -532,3 +540,6 @@ class FilterSink(Sink, HasPredicate):
     def put_trial(self, trial: Trial) -> None:
         if self._predicate(trial):
             return self._decorated.put_trial(trial)
+
+    def put_trials(self, trials: Sequence[Trial]) -> None:
+        return self._decorated.put_trials([x for x in trials if self._predicate(x)])

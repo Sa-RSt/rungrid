@@ -7,7 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import IO, Literal, Protocol
+from typing import IO, Literal, Protocol, Sequence
 
 from optuna.storages.journal import JournalFileOpenLock
 
@@ -261,8 +261,6 @@ class CSVSink(Sink):
     def __init__(self, fp: IO) -> None:
         super().__init__()
         self._fp = fp
-        self._next_flush = 4
-        self._next_flush_max = 4
         self._csv = csv.writer(fp)
         self._csv.writerow(
             [
@@ -278,29 +276,31 @@ class CSVSink(Sink):
             ]
         )
 
-    def put_trial(self, trial: Trial) -> None:
-        s = trial.as_stale()
-        self._csv.writerow(
+    def put_trials(self, trials: Sequence[Trial]) -> None:
+        stales = (x.as_stale() for x in trials)
+        self._csv.writerows(
             [
-                s.uuid,
-                s.optuna_trial_number,
-                ";".join(s.tags),
-                ";".join(r.step.name for r in s.step_records),
-                ";".join(r.start.isoformat() for r in s.step_records),
-                ";".join(r.end.isoformat() for r in s.step_records),
-                repr(s.result.result)
-                if s.result is not None and s.result.result is not None
-                else "",
-                repr(s.result.error)
-                if s.result is not None and s.result.error is not None
-                else "",
-                repr(s.result.prune_reason)
-                if s.result is not None and s.result.prune_reason is not None
-                else "",
+                [
+                    s.uuid,
+                    s.optuna_trial_number,
+                    ";".join(s.tags),
+                    ";".join(r.step.name for r in s.step_records),
+                    ";".join(r.start.isoformat() for r in s.step_records),
+                    ";".join(r.end.isoformat() for r in s.step_records),
+                    repr(s.result.result)
+                    if s.result is not None and s.result.result is not None
+                    else "",
+                    repr(s.result.error)
+                    if s.result is not None and s.result.error is not None
+                    else "",
+                    repr(s.result.prune_reason)
+                    if s.result is not None and s.result.prune_reason is not None
+                    else "",
+                ]
+                for s in stales
             ]
         )
-        self._next_flush -= 1
-        if self._next_flush == 0:
-            self._next_flush_max *= 2
-            self._next_flush = self._next_flush_max
-            self._fp.flush()
+        self._fp.flush()
+
+    def put_trial(self, trial: Trial) -> None:
+        self.put_trials([trial])
