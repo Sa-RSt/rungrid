@@ -1,3 +1,5 @@
+"""Storage systems and export sinks for recording experimental trials on disk."""
+
 import csv
 import os
 import re
@@ -258,7 +260,14 @@ class BucketFileStorage(Sink, Source):
 
 
 class CSVSink(Sink):
+    """A trial Sink that writes trial summaries to a CSV file or stream."""
+
     def __init__(self, fp: IO) -> None:
+        """Initialize the CSVSink with a file-like write stream.
+
+        :param fp: A writeable file-like object to write CSV rows to.
+        :type fp: typing.IO
+        """
         super().__init__()
         self._fp = fp
         self._csv = csv.writer(fp)
@@ -277,6 +286,11 @@ class CSVSink(Sink):
         )
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
+        """Write a sequence of trials to the CSV stream.
+
+        :param trials: The sequence of Trial instances to write.
+        :type trials: collections.abc.Sequence[Trial]
+        """
         stales = (x.as_stale() for x in trials)
         self._csv.writerows(
             [
@@ -303,4 +317,9 @@ class CSVSink(Sink):
         self._fp.flush()
 
     def put_trial(self, trial: Trial) -> None:
+        """Write a single trial summary to the CSV stream.
+
+        :param trial: The trial instance to write.
+        :type trial: Trial
+        """
         self.put_trials([trial])

@@ -1,3 +1,5 @@
+"""Command-line entry point to generate sample template files for rungrid."""
+
 import shutil
 import sys
 from pathlib import Path
@@ -74,6 +76,7 @@ def _get_rgrc_bak_path() -> Path:
 
 
 def main():
+    """Execute the command-line interface to set up sample template files."""
     main_path = _get_main_path()
     rgrc_path = Path("rgrc.py").resolve()
     if rgrc_path.exists():

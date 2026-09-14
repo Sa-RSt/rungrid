@@ -1,3 +1,5 @@
+"""Command-line interface and parsing utilities for running rungrid experiments."""
+
 import argparse
 from collections.abc import Callable
 from pathlib import Path
@@ -16,13 +18,7 @@ _RGRC_PY = "rgrc.py"
 
 
 class CLI(argparse.ArgumentParser):
-    def add_experiment(self, exp: Experiment) -> None:
-        current_experiments = getattr(self, "_experiments", [])
-        current_experiments.append(exp)
-        setattr(self, "_experiments", current_experiments)
-
-    def get_experiments(self) -> list[Experiment]:
-        return list(getattr(self, "_experiments", []))
+    """Command-line interface runner and argument parser for configuring and executing experiments."""
 
     def _get_rgrc_environment(self) -> dict[str, Any]:
         rgrc = getattr(self, "_rgrc", None)
@@ -119,11 +115,17 @@ class CLI(argparse.ArgumentParser):
             sink.put_trial(trial)
 
     def run(self, args):
+        """Parse command-line arguments and run the specified rungrid subcommand.
+
+        :param args: The list of command-line arguments to parse.
+        :type args: list[str]
+        """
         self.add_rungrid_args()
         ns = self.parse_args(args)
         ns.rg_subcommand_fn(ns)
 
     def add_rungrid_args(self) -> None:
+        """Add predefined rungrid arguments and subparsers to the parser."""
         rgrc_help = f"(must be declared or imported in {_RGRC_PY})"
         rgrc_ctx_help = f"(will be run in the context of {_RGRC_PY})"
         subparsers = self.add_subparsers(

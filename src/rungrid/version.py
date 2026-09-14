@@ -1,3 +1,5 @@
+"""Utilities for generating unique version strings for experiments."""
+
 from collections.abc import Callable
 import datetime
 import inspect
@@ -36,6 +38,22 @@ def version_from_most_recent_mtime(
         r".*\.py.?$", re.IGNORECASE
     ),
 ) -> str:
+    """Generate a version string based on the most recent file modification time in a directory.
+
+    Traverses the base directory, finds files matching the given pattern, and determines the
+    latest modification time. Converts this time into an ISO format string.
+
+    :param klass: The class whose file path will be used as a default base directory.
+    :type klass: type
+    :param base_dir: Path to the directory to traverse. If None, derived from klass.
+    :type base_dir: str | os.PathLike | None
+    :param only_file_names_matching: Pattern or function to filter file names.
+    :type only_file_names_matching: collections.abc.Callable | re.Pattern
+    :return: A version string derived from the maximum modification timestamp.
+    :rtype: str
+    :raises RuntimeError: If base_dir is None and klass is an extension type.
+    :raises FileNotFoundError: If no files matching the pattern are found.
+    """
     if base_dir is None:
         try:
             path_str = inspect.getfile(klass)
@@ -49,7 +67,7 @@ def version_from_most_recent_mtime(
         only_file_names_matching = only_file_names_matching.match
     mtime = _get_max_mtime(Path(base_dir).resolve(), only_file_names_matching)
     if mtime == _NEGATIVE_INFINITY:
-        raise OSError(
+        raise FileNotFoundError(
             f"no files matching {only_file_names_matching} were found while traversing {base_dir}"
         )
     dt = datetime.datetime.fromtimestamp(mtime)
@@ -68,6 +86,21 @@ def version_from_git_commit_hash(
     repository_location: str | os.PathLike | None = None,
     git_executable: str | os.PathLike = "git",
 ) -> str:
+    """Generate a version string using the most recent git commit hash.
+
+    Runs `git log` in the repository location and extracts the hash of the latest commit.
+
+    :param klass: The class whose file path will be used as a default repository location.
+    :type klass: type
+    :param repository_location: Path to the git repository or a sub-folder/file inside it. If None, derived from klass.
+    :type repository_location: str | os.PathLike | None
+    :param git_executable: Path or name of the git executable to run.
+    :type git_executable: str | os.PathLike
+    :return: The latest git commit hash.
+    :rtype: str
+    :raises RuntimeError: If repository_location is None and klass is an extension type.
+    :raises SubprocessBehaviorError: If the git command fails or returns unexpected output.
+    """
     command = [git_executable, "log"]
 
     def _raise_error(stdout: bytes, stderr: bytes, exit_code: int | None) -> NoReturn:

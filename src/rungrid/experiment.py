@@ -1,11 +1,11 @@
-import inspect
+"""Experiment, Trial, and Sampler declarations and related framework signals."""
+
 import random
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
-from hashlib import md5
 from typing import Any, Generic, Iterable, NoReturn, Sequence, Type, TypeVar, final
 from uuid import UUID
 
@@ -479,7 +479,8 @@ class VarNamespace:
 class ExperimentStep:
     """Represents a discrete step in an experiment.
 
-    Tracks execution metadata such as caching options, run counts, and average runtime.
+    Tracks execution metadata such as caching options, exceptions to
+    recover from, argument names to drop and experiment information.
     """
 
     name: str
@@ -573,6 +574,15 @@ class TrialResult:
 
     @classmethod
     def make_pruned(cls, reason: str, end: datetime) -> Self:
+        """Create a pruned TrialResult containing a prune reason.
+
+        :param reason: The reason why the trial was pruned.
+        :type reason: str
+        :param end: The completion timestamp.
+        :type end: datetime.datetime
+        :return: A pruned TrialResult.
+        :rtype: TrialResult
+        """
         return cls(None, None, reason, False, True, end)
 
     @classmethod
@@ -610,11 +620,15 @@ def step_method(
     recover_from: Iterable[type[BaseException]] = [KeyboardInterrupt],
     drop_args: Iterable[str] = [],
 ):
-    """Decorator a method of an Experiment subclass as a step.
+    """Decorate a method of an Experiment subclass as an experiment step.
 
-    :param fn: The step function to decorate.
-    :type fn: collections.abc.Callable
-    :return: The decorated function with a `_is_cacheable` attribute.
+    :param cache: Whether the step result is cacheable.
+    :type cache: bool
+    :param recover_from: Exceptions to ignore/recover from during this step.
+    :type recover_from: collections.abc.Iterable[type[BaseException]]
+    :param drop_args: Argument names to drop before passing to the next step.
+    :type drop_args: collections.abc.Iterable[str]
+    :return: A decorator function that wraps the step method.
     :rtype: collections.abc.Callable
     """
 
@@ -689,16 +703,30 @@ class SignalPrune(ExperimentSignal):
 
 
 class ExperimentRegistry:
+    """Registry to keep track of loaded Experiment instances by name and identifier."""
+
     def __init__(self) -> None:
+        """Initialize the ExperimentRegistry."""
         self._experiments_by_name: dict[str, Experiment] = {}
         self._experiments_by_ident: dict[str, Experiment] = {}
 
     @classmethod
     @lru_cache
     def get_instance(cls):
+        """Get the global single instance of the registry.
+
+        :return: The global ExperimentRegistry.
+        :rtype: ExperimentRegistry
+        """
         return cls()
 
     def register(self, exp: "Experiment") -> None:
+        """Register an experiment instance.
+
+        :param exp: The experiment to register.
+        :type exp: Experiment
+        :raises StructureError: If an experiment with the same name is already registered.
+        """
         if exp.name in self._experiments_by_name.keys():
             raise StructureError(
                 f'non-unique experiment name "{exp.name}". Do you have'
@@ -709,9 +737,23 @@ class ExperimentRegistry:
         self._experiments_by_ident[exp.identifier] = exp
 
     def get_by_name(self, name: str) -> "Experiment | None":
+        """Retrieve a registered experiment by its class name.
+
+        :param name: The name of the experiment class.
+        :type name: str
+        :return: The registered Experiment instance, or None if not found.
+        :rtype: Experiment | None
+        """
         return self._experiments_by_name.get(name, None)
 
     def get_by_ident(self, ident: str) -> "Experiment | None":
+        """Retrieve a registered experiment by its unique identifier.
+
+        :param ident: The unique identifier of the experiment.
+        :type ident: str
+        :return: The registered Experiment instance, or None if not found.
+        :rtype: Experiment | None
+        """
         return self._experiments_by_ident.get(ident, None)
 
 
@@ -767,15 +809,7 @@ class Experiment(ABC, Generic[T]):
         :return: The experiment's version string.
         :rtype: str
         """
-        hasher = md5(usedforsecurity=False)
-        try:
-            src = inspect.getsource(type(self))
-        except TypeError:
-            ch = "0" * len(hasher.hexdigest())
-        else:
-            hasher.update(src.encode())
-            ch = hasher.hexdigest()
-        return ch
+        pass
 
     @property
     @lru_cache
@@ -905,6 +939,11 @@ class Trial(ABC):
 
     @property
     def experiment_idents(self) -> set[str]:
+        """Get the set of experiment identifiers for all steps executed in this trial.
+
+        :return: A set of unique experiment identifier strings.
+        :rtype: set[str]
+        """
         return {x.step.experiment_ident for x in self.step_records}
 
     @property
@@ -1017,6 +1056,13 @@ class Trial(ABC):
         )
 
     def with_result(self, result: TrialResult) -> "StaleTrial":
+        """Return a copy of this trial as a StaleTrial updated with the given result.
+
+        :param result: The TrialResult to attach to the trial copy.
+        :type result: TrialResult
+        :return: A StaleTrial copy with the result set.
+        :rtype: StaleTrial
+        """
         t = self.as_stale()
         t._result = result
         return t
@@ -1031,7 +1077,7 @@ class Trial(ABC):
 
 
 class LiveTrial(Trial):
-    """Represents an active, currently executing trial."""
+    """Represents a trial with an Optuna trial associated to it."""
 
     def __init__(
         self,

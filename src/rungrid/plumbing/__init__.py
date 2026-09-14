@@ -1,3 +1,5 @@
+"""Serialization wrapper and base components for trial sources and sinks."""
+
 import importlib.util
 import pickle
 import random
@@ -31,6 +33,9 @@ class LoaderDumper:
         dumper_kwargs,
     ) -> None:
         """Create a serializer/deserializer wrapper.
+
+        The `make*` methods are probably more suitable for most use cases than calling
+        the constructor directly.
 
         :param desc: A description for the serializer (used for debugging/repr).
         :type desc: str
@@ -98,6 +103,11 @@ class LoaderDumper:
         self._dumper(obj, stream, *self._dumper_args, **self._dumper_kwargs)
 
     def __repr__(self) -> str:
+        """Return a string representation of the LoaderDumper instance.
+
+        :return: A string representation indicating the backend descriptor.
+        :rtype: str
+        """
         return f"LoaderDumper({self._desc})"
 
     @classmethod
@@ -234,6 +244,13 @@ class Sink(ABC):
     """Abstract base class representing a write-only sink for experimental trials."""
 
     def with_sink_filter(self, predicate: PredicateType) -> "FilterSink":
+        """Wrap this sink with a filtering predicate.
+
+        :param predicate: A filter function returning True for trials to accept.
+        :type predicate: PredicateType
+        :return: A FilterSink wrapping this sink.
+        :rtype: FilterSink
+        """
         return FilterSink(self, predicate)
 
     @abstractmethod
@@ -246,6 +263,11 @@ class Sink(ABC):
         pass
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
+        """Store multiple trials in the sink.
+
+        :param trials: A sequence of trials to store.
+        :type trials: collections.abc.Sequence[Trial]
+        """
         for trial in trials:
             self.put_trial(trial)
 
@@ -254,6 +276,13 @@ class Source(ABC):
     """Abstract base class representing a read-only source for experimental trials."""
 
     def with_source_filter(self, predicate: PredicateType) -> "FilterSource":
+        """Wrap this source with a filtering predicate.
+
+        :param predicate: A filter function returning True for trials to yield.
+        :type predicate: PredicateType
+        :return: A FilterSource wrapping this source.
+        :rtype: FilterSource
+        """
         return FilterSource(self, predicate)
 
     @abstractmethod
@@ -372,8 +401,12 @@ class MultiSource(Source):
         :param search_tag: Optional tag string filter.
         :type search_tag: str | None
         :return: An iterable of stored trials.
-        :rtype: collections.abc.Iterable[StaleTrial]
+        :rtype: collections.abc.Iterable[Trial]
         """
+
+        # The iterable returned by get_trials can be infinite,
+        # so you can't just pick a component at random and
+        # yield from it.
         sources = list(self._sources)
         pool: list[Source | Iterator[Trial]] = list(sources)
         available: list[bool] = [True] * len(pool)
@@ -408,13 +441,25 @@ class MultiSource(Source):
         :param search_tag: Optional tag string filter.
         :type search_tag: str | None
         :return: A tagged StaleTrial, or None.
-        :rtype: StaleTrial | None
+        :rtype: Trial | None
         """
         if not self._sources:
             return None
         retries = 2 * len(self._sources)
         for _ in range(retries):
             comp = self._rng.choice(self._sources)
+            trial = comp.consume_and_tag(
+                applied_tag=applied_tag,
+                finished=finished,
+                search_tag=search_tag,
+                predicate=predicate,
+            )
+            if trial is not None:
+                return trial
+
+        # Before returning None, actually make sure no components
+        # have available trials.
+        for comp in self._sources:
             trial = comp.consume_and_tag(
                 applied_tag=applied_tag,
                 finished=finished,
@@ -448,6 +493,11 @@ class CopyingMultiSink(Sink):
             comp.put_trial(trial)
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
+        """Store multiple trials in all component sinks.
+
+        :param trials: A sequence of trials to record.
+        :type trials: collections.abc.Sequence[Trial]
+        """
         for comp in self._sinks:
             comp.put_trials(trials)
 
@@ -481,7 +531,7 @@ class RandomMultiSink(Sink):
             pool = list(self._sinks)
             comp = self._rng.choice(pool)
             while isinstance(comp, HasPredicate) and not comp.get_predicate()(trial):
-                pool.remove(comp)
+                pool = [x for x in pool if x is not comp]
                 if not pool:
                     return None
                 comp = self._rng.choice(pool)
@@ -489,13 +539,29 @@ class RandomMultiSink(Sink):
 
 
 class HasPredicate(ABC):
+    """Abstract base class for components that filter trials using a predicate function."""
+
     @abstractmethod
     def get_predicate(self) -> PredicateType:
+        """Get the filtering predicate function.
+
+        :return: The predicate function.
+        :rtype: PredicateType
+        """
         pass
 
 
 class FilterSource(Source, HasPredicate):
+    """A trial source that filters trials from an underlying source using a predicate."""
+
     def __init__(self, decorated: Source, predicate: PredicateType) -> None:
+        """Initialize the FilterSource.
+
+        :param decorated: The underlying source to retrieve trials from.
+        :type decorated: Source
+        :param predicate: The predicate function to filter trials.
+        :type predicate: PredicateType
+        """
         super().__init__()
         self._decorated = decorated
         self._predicate = predicate
@@ -503,6 +569,15 @@ class FilterSource(Source, HasPredicate):
     def get_trials(
         self, *, finished: bool | None = None, search_tag: str | None = None
     ) -> Iterable[Trial]:
+        """Retrieve filtered trials matching criteria from the decorated source.
+
+        :param finished: Filter by finished state.
+        :type finished: bool | None
+        :param search_tag: Optional tag string filter.
+        :type search_tag: str | None
+        :return: An iterable of filtered Trial instances.
+        :rtype: collections.abc.Iterable[Trial]
+        """
         for trial in self._decorated.get_trials(
             finished=finished, search_tag=search_tag
         ):
@@ -510,6 +585,11 @@ class FilterSource(Source, HasPredicate):
                 yield trial
 
     def get_predicate(self) -> PredicateType:
+        """Get the filtering predicate function.
+
+        :return: The predicate function.
+        :rtype: PredicateType
+        """
         return self._predicate
 
     def consume_and_tag(
@@ -520,6 +600,19 @@ class FilterSource(Source, HasPredicate):
         search_tag: str | None = None,
         predicate: PredicateType = lambda _: True,
     ) -> Trial | None:
+        """Find, tag, and return a trial that satisfies both the source predicate and the input predicate.
+
+        :param applied_tag: The tag to append to the found trial.
+        :type applied_tag: str
+        :param finished: Filter by finished state.
+        :type finished: bool | None
+        :param search_tag: Optional tag filter to apply.
+        :type search_tag: str | None
+        :param predicate: An additional filter function.
+        :type predicate: PredicateType
+        :return: The selected, tagged trial copy, or None if no match is found.
+        :rtype: Trial | None
+        """
         return self._decorated.consume_and_tag(
             applied_tag,
             finished=finished,
@@ -529,17 +622,41 @@ class FilterSource(Source, HasPredicate):
 
 
 class FilterSink(Sink, HasPredicate):
+    """A trial sink that filters trials using a predicate before storing them in an underlying sink."""
+
     def __init__(self, decorated: Sink, predicate: PredicateType) -> None:
+        """Initialize the FilterSink.
+
+        :param decorated: The underlying sink to write accepted trials to.
+        :type decorated: Sink
+        :param predicate: The predicate function to filter trials.
+        :type predicate: PredicateType
+        """
         super().__init__()
         self._decorated = decorated
         self._predicate = predicate
 
     def get_predicate(self) -> PredicateType:
+        """Get the filtering predicate function.
+
+        :return: The predicate function.
+        :rtype: PredicateType
+        """
         return self._predicate
 
     def put_trial(self, trial: Trial) -> None:
+        """Store the trial if it satisfies the predicate.
+
+        :param trial: The trial instance to store.
+        :type trial: Trial
+        """
         if self._predicate(trial):
             return self._decorated.put_trial(trial)
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
+        """Store trials that satisfy the predicate.
+
+        :param trials: A sequence of Trial instances to store.
+        :type trials: collections.abc.Sequence[Trial]
+        """
         return self._decorated.put_trials([x for x in trials if self._predicate(x)])
