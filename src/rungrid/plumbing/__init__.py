@@ -409,8 +409,7 @@ class MultiSource(Source):
         # yield from it.
         sources = list(self._sources)
         pool: list[Source | Iterator[Trial]] = list(sources)
-        available: list[bool] = [True] * len(pool)
-        while any(available):
+        while pool:
             i = self._rng.randrange(len(pool))
             iterator = pool[i]
             if isinstance(iterator, Source):
@@ -419,10 +418,8 @@ class MultiSource(Source):
                 )
             try:
                 yield next(iterator)
-                available[i] = True
             except StopIteration:
-                pool[i] = sources[i]
-                available[i] = False
+                pool = [x for x in pool if x is not iterator]
 
     def consume_and_tag(
         self,
