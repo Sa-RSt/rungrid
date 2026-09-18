@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
+from types import MethodType
 from typing import Any, Generic, Iterable, NoReturn, Sequence, Type, TypeVar, final
 from uuid import UUID
 
@@ -528,10 +529,11 @@ class _ExperimentStepBuilder:
     drop_args: set[str]
 
     def build(self, experiment: "Experiment"):
+        bound_fn = MethodType(self.fn, experiment)
         return ExperimentStep(
             name=self.name,
             cacheable=self.cacheable,
-            fn=self.fn,
+            fn=bound_fn,
             recover_from=self.recover_from,
             drop_args=self.drop_args,
             experiment_ident=experiment.identifier,
@@ -785,7 +787,7 @@ class Experiment(ABC, Generic[T]):
         """
         self._steps: dict[str, ExperimentStep] = {}
 
-        for val in vars(self).values():
+        for val in vars(type(self)).values():
             if callable(val):
                 fqn = _get_fqn(val)
                 try:
@@ -859,7 +861,7 @@ class Experiment(ABC, Generic[T]):
     @final
     def _step_from_fn(self, fn: Callable) -> ExperimentStep:
         for _, step in self._steps.items():
-            if step.fn is fn:
+            if step.fn is fn or step.fn == fn:
                 return step
         raise LookupError(
             f"{fn!r} was not recognized as an experiment step. "
