@@ -1057,13 +1057,16 @@ class Trial(ABC):
         :return: A serialized-friendly StoredTrial instance.
         :rtype: StoredTrial
         """
-        return StaleTrial(
+        stale = StaleTrial(
             self.optuna_trial_number,
             self.uuid,
             self.v._as_stale(),
             self._step_records,
             self._tags,
         )
+        if self._result is not None:
+            stale._result = self._result
+        return stale
 
     def with_result(self, result: TrialResult) -> "StaleTrial":
         """Return a copy of this trial as a StaleTrial updated with the given result.
