@@ -227,3 +227,94 @@ my_scheduler = LocalDispatcher.make_default(SchedCliExperiment(), ".rg-cache-tes
 
     rgrc = cli._get_rgrc_environment()
     assert "my_scheduler" in rgrc
+
+
+def test_cli_jobs_configuration_multiple(run_in_tmp_dir):
+    """Verify that CLI sets correct number of jobs in LocalDispatcher and creates multiple worker jobs."""
+    from rungrid.experiment import ExperimentRegistry
+    ExperimentRegistry.get_instance()._experiments_by_name.clear()
+    ExperimentRegistry.get_instance()._experiments_by_ident.clear()
+
+    rgrc_content = """
+from rungrid.experiment import Experiment, VarNamespace, step_method
+from rungrid.dispatch import LocalDispatcher
+from rungrid.plumbing import Empty
+
+my_source = Empty()
+my_sink = Empty()
+
+class JobsMultipleCliExperiment(Experiment):
+    def version(self) -> str:
+        return "sched-cli-1.0"
+
+    def variables(self, v: VarNamespace, s) -> None:
+        v.x = 1
+
+    def first_step(self):
+        return self.step_one
+
+    @step_method()
+    def step_one(self, trial, **kwargs):
+        return "done"
+
+my_scheduler = LocalDispatcher.make_default(JobsMultipleCliExperiment(), ".rg-cache-test")
+"""
+    with open("rgrc.py", "w") as f:
+        f.write(rgrc_content)
+
+    cli = CLI()
+    # Run with 2 jobs
+    cli.run(["run", "-i", "my_source", "-o", "my_sink", "--jobs", "2", "my_scheduler"])
+
+    rgrc = cli._get_rgrc_environment()
+    assert "my_scheduler" in rgrc
+    sched = rgrc["my_scheduler"]
+    assert sched._job.n_jobs == 2
+    # Ensure LokyBackend (or similar parallel backend) is used for parallel jobs
+    assert "Sequential" not in type(sched._job._backend).__name__
+
+
+def test_cli_jobs_configuration_one(run_in_tmp_dir):
+    """Verify that CLI sets n_jobs=1 in LocalDispatcher and uses SequentialBackend (no subprocesses)."""
+    from rungrid.experiment import ExperimentRegistry
+    ExperimentRegistry.get_instance()._experiments_by_name.clear()
+    ExperimentRegistry.get_instance()._experiments_by_ident.clear()
+
+    rgrc_content = """
+from rungrid.experiment import Experiment, VarNamespace, step_method
+from rungrid.dispatch import LocalDispatcher
+from rungrid.plumbing import Empty
+
+my_source = Empty()
+my_sink = Empty()
+
+class JobsOneCliExperiment(Experiment):
+    def version(self) -> str:
+        return "sched-cli-1.0"
+
+    def variables(self, v: VarNamespace, s) -> None:
+        v.x = 1
+
+    def first_step(self):
+        return self.step_one
+
+    @step_method()
+    def step_one(self, trial, **kwargs):
+        return "done"
+
+my_scheduler = LocalDispatcher.make_default(JobsOneCliExperiment(), ".rg-cache-test")
+"""
+    with open("rgrc.py", "w") as f:
+        f.write(rgrc_content)
+
+    cli = CLI()
+    # Run with 1 job (sequential, no subprocesses)
+    cli.run(["run", "-i", "my_source", "-o", "my_sink", "--jobs", "1", "my_scheduler"])
+
+    rgrc = cli._get_rgrc_environment()
+    assert "my_scheduler" in rgrc
+    sched = rgrc["my_scheduler"]
+    assert sched._job.n_jobs == 1
+    # Ensure SequentialBackend is used, which avoids any subprocess overhead/creation
+    assert type(sched._job._backend).__name__ == "SequentialBackend"
+

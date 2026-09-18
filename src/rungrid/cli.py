@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Iterable
 
+import joblib
 import optuna
 from tqdm import tqdm
 
@@ -128,28 +129,31 @@ class CLI(argparse.ArgumentParser):
         )
 
     def _subcommand_run(self, args):
-        rgrc = self._get_rgrc_environment()
-        study_factory: Callable[[str], optuna.Study] | None = rgrc.get(
-            args.study_factory, None
-        )
-        experiment_class_or_sched: type[Experiment] | Scheduler = rgrc[args.class_name]
-        if isinstance(experiment_class_or_sched, Scheduler):
-            sched = experiment_class_or_sched
-            experiment = sched.get_experiment()
-        else:
-            experiment = experiment_class_or_sched()
-            sched = LocalDispatcher.make_default(experiment, args.cache_dir)
-        if study_factory is None:
-            source = self._get_source(args)
-            sink = self._get_sink(args)
-        else:
-            study = study_factory(experiment.identifier)
-            sampler = OptimizingSampler(experiment, study)
-            source = self._get_source(args, sampler)
-            sink = self._get_sink(args, sampler)
-        it = self._get_source_trial_iter(source, args)
-        for trial in sched.schedule(it):
-            sink.put_trial(trial)
+        with joblib.parallel_config(n_jobs=args.jobs):
+            rgrc = self._get_rgrc_environment()
+            study_factory: Callable[[str], optuna.Study] | None = rgrc.get(
+                args.study_factory, None
+            )
+            experiment_class_or_sched: type[Experiment] | Scheduler = rgrc[
+                args.class_name
+            ]
+            if isinstance(experiment_class_or_sched, Scheduler):
+                sched = experiment_class_or_sched
+                experiment = sched.get_experiment()
+            else:
+                experiment = experiment_class_or_sched()
+                sched = LocalDispatcher.make_default(experiment, args.cache_dir)
+            if study_factory is None:
+                source = self._get_source(args)
+                sink = self._get_sink(args)
+            else:
+                study = study_factory(experiment.identifier)
+                sampler = OptimizingSampler(experiment, study)
+                source = self._get_source(args, sampler)
+                sink = self._get_sink(args, sampler)
+            it = self._get_source_trial_iter(source, args)
+            for trial in sched.schedule(it):
+                sink.put_trial(trial)
 
     def _subcommand_pump(self, args):
         source = self._get_source(args)
@@ -279,6 +283,13 @@ class CLI(argparse.ArgumentParser):
             type=str,
             help="the directory in which to store cache of step results",
             default=".rg-cache",
+        )
+        subparser.add_argument(
+            "-j",
+            "--jobs",
+            type=int,
+            help="number of parallel jobs (subprocesses) to run the experiment in",
+            default=1,
         )
         subparser.add_argument(
             "-M",
