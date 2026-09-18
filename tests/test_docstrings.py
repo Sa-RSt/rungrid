@@ -1,8 +1,10 @@
-import inspect
 import importlib
+import inspect
 import pkgutil
 import re
+
 import pytest
+
 import rungrid
 
 
@@ -15,19 +17,20 @@ def get_all_submodules(package):
     return submodules
 
 
-@pytest.mark.parametrize(
-    "module",
-    [rungrid] + get_all_submodules(rungrid)
-)
+@pytest.mark.parametrize("module", [rungrid] + get_all_submodules(rungrid))
 def test_all_public_docstrings(module):
     # Check module docstring
     assert module.__doc__ is not None, f"Module {module.__name__} has no docstring"
-    assert len(module.__doc__.strip()) > 0, f"Module {module.__name__} has an empty docstring"
+    assert len(module.__doc__.strip()) > 0, (
+        f"Module {module.__name__} has an empty docstring"
+    )
 
     # Walk all public items in the module
     for name, obj in inspect.getmembers(module):
         # We only care about public items or dunder methods
-        is_private = name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+        is_private = name.startswith("_") and not (
+            name.startswith("__") and name.endswith("__")
+        )
         if is_private:
             continue
 
@@ -40,8 +43,12 @@ def test_all_public_docstrings(module):
 
         if inspect.isclass(obj):
             # Check class docstring
-            assert obj.__doc__ is not None, f"Class {obj.__module__}.{obj.__name__} has no docstring"
-            assert len(obj.__doc__.strip()) > 0, f"Class {obj.__module__}.{obj.__name__} has an empty docstring"
+            assert obj.__doc__ is not None, (
+                f"Class {obj.__module__}.{obj.__name__} has no docstring"
+            )
+            assert len(obj.__doc__.strip()) > 0, (
+                f"Class {obj.__module__}.{obj.__name__} has an empty docstring"
+            )
 
             # Get class source code to check for explicit declarations
             try:
@@ -52,7 +59,9 @@ def test_all_public_docstrings(module):
             # Check methods
             for method_name, method in inspect.getmembers(obj):
                 # Skip private methods
-                method_private = method_name.startswith("_") and not (method_name.startswith("__") and method_name.endswith("__"))
+                method_private = method_name.startswith("_") and not (
+                    method_name.startswith("__") and method_name.endswith("__")
+                )
                 if method_private:
                     continue
 
@@ -63,12 +72,18 @@ def test_all_public_docstrings(module):
                 # Verify that this method is explicitly defined in the class source code
                 # (avoids checking auto-generated dataclass/typing/Protocol methods)
                 if class_source:
-                    has_explicit_def = re.search(r"\bdef\s+" + re.escape(method_name) + r"\b", class_source)
+                    has_explicit_def = re.search(
+                        r"\bdef\s+" + re.escape(method_name) + r"\b", class_source
+                    )
                     if not has_explicit_def:
                         continue
 
                 method_obj = getattr(obj, method_name)
-                if not (inspect.isfunction(method_obj) or inspect.ismethod(method_obj) or isinstance(method_obj, (property, classmethod, staticmethod))):
+                if not (
+                    inspect.isfunction(method_obj)
+                    or inspect.ismethod(method_obj)
+                    or isinstance(method_obj, (property, classmethod, staticmethod))
+                ):
                     continue
 
                 doc = None
@@ -79,10 +94,18 @@ def test_all_public_docstrings(module):
                 else:
                     doc = method_obj.__doc__
 
-                assert doc is not None, f"Method {obj.__module__}.{obj.__name__}.{method_name} has no docstring"
-                assert len(doc.strip()) > 0, f"Method {obj.__module__}.{obj.__name__}.{method_name} has an empty docstring"
+                assert doc is not None, (
+                    f"Method {obj.__module__}.{obj.__name__}.{method_name} has no docstring"
+                )
+                assert len(doc.strip()) > 0, (
+                    f"Method {obj.__module__}.{obj.__name__}.{method_name} has an empty docstring"
+                )
 
         elif inspect.isfunction(obj):
             # Check function docstring
-            assert obj.__doc__ is not None, f"Function {obj.__module__}.{obj.__name__} has no docstring"
-            assert len(obj.__doc__.strip()) > 0, f"Function {obj.__module__}.{obj.__name__} has an empty docstring"
+            assert obj.__doc__ is not None, (
+                f"Function {obj.__module__}.{obj.__name__} has no docstring"
+            )
+            assert len(obj.__doc__.strip()) > 0, (
+                f"Function {obj.__module__}.{obj.__name__} has an empty docstring"
+            )
