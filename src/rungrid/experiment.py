@@ -410,8 +410,11 @@ class VarNamespace:
         :param value: The constant value to assign.
         :type value: typing.Any
         """
-        ss = SamplingStrategy.make_precomputed(value, self._variable_names)
-        self.sampled(name, ss)
+        if name.startswith("_"):
+            super().__setattr__(name, value)
+        else:
+            ss = SamplingStrategy.make_precomputed(value, self._variable_names)
+            self.sampled(name, ss)
 
     def _set_variable(self, name: str, value: Any, /) -> None:
         if name in [
@@ -438,9 +441,14 @@ class VarNamespace:
         :type name: str
         :return: The value associated with the variable.
         :rtype: typing.Any
-        :raises KeyError: If the variable does not exist.
+        :raises AttributeError: If the variable does not exist.
         """
-        return self._variables_dict[name]
+        if name.startswith("_") or "_variables_dict" not in self.__dict__:
+            raise AttributeError(f"'VarNamespace' object has no attribute {name!r}")
+        try:
+            return self._variables_dict[name]
+        except KeyError:
+            raise AttributeError(f"'VarNamespace' object has no attribute {name!r}")
 
     def __getitem__(self, name: str, /) -> Any:
         """Retrieve a variable's value using bracket notation.
