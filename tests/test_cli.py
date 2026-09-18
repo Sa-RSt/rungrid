@@ -318,3 +318,51 @@ my_scheduler = LocalDispatcher.make_default(JobsOneCliExperiment(), ".rg-cache-t
     # Ensure SequentialBackend is used, which avoids any subprocess overhead/creation
     assert type(sched._job._backend).__name__ == "SequentialBackend"
 
+
+def test_cli_pump_with_predicate(run_in_tmp_dir):
+    """Verify that the CLI pump subcommand filters trials using a custom python expression via --predicate."""
+    rgrc_content = """
+from uuid import uuid4
+from rungrid.experiment import VarNamespace, StaleTrial
+from rungrid.plumbing import Source, Sink
+
+class SimpleSource(Source):
+    def __init__(self, trials):
+        self.trials = list(trials)
+    def get_trials(self, **kwargs):
+        return self.trials
+    def consume_and_tag(self, applied_tag, **kwargs):
+        pass
+
+class SimpleSink(Sink):
+    def __init__(self):
+        self.trials = []
+    def put_trial(self, trial):
+        self.trials.append(trial)
+
+v = VarNamespace(set())
+trial_1 = StaleTrial(1, uuid4(), v)
+trial_2 = StaleTrial(2, uuid4(), v)
+
+src = SimpleSource([trial_1, trial_2])
+snk1 = SimpleSink()
+snk2 = SimpleSink()
+"""
+    with open("rgrc.py", "w") as f:
+        f.write(rgrc_content)
+
+    cli1 = CLI()
+    # Pump only trials with optuna_trial_number == 1
+    cli1.run(["pump", "-i", "src", "-o", "snk1", "-P", "trial.optuna_trial_number == 1"])
+
+    cli2 = CLI()
+    # Pump with a predicate that matches none
+    cli2.run(["pump", "-i", "src", "-o", "snk2", "-P", "trial.optuna_trial_number == 42"])
+
+    rgrc1 = cli1._get_rgrc_environment()
+    rgrc2 = cli2._get_rgrc_environment()
+    assert len(rgrc1["snk1"].trials) == 1
+    assert rgrc1["snk1"].trials[0].optuna_trial_number == 1
+    assert len(rgrc2["snk2"].trials) == 0
+
+
