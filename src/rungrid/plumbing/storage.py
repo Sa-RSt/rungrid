@@ -256,6 +256,12 @@ class BucketFileStorage(Sink, Source):
                     sampled = trial
                     break
             if sampled is not None:
+                old_bucket = self._bucket_path(sampled)
+                old_trials = self._read_bucket(old_bucket)
+                old_trials_new = [x for x in old_trials if x.uuid != sampled.uuid]
+                if len(old_trials) != len(old_trials_new):
+                    self._write_bucket(old_bucket, old_trials_new)
+
                 sampled.add_tag(applied_tag)
                 self.put_trial(sampled)
         return sampled
