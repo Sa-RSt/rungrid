@@ -1086,7 +1086,7 @@ class Trial(ABC):
         :return: True if the trial result is set, False otherwise.
         :rtype: bool
         """
-        return self.result is None
+        return self.result is not None
 
 
 class LiveTrial(Trial):
