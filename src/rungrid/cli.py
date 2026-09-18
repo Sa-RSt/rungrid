@@ -1,8 +1,10 @@
 """Command-line interface and parsing utilities for running rungrid experiments."""
 
 import argparse
+import shutil
 from collections.abc import Callable
 from pathlib import Path
+import sys
 from typing import Any, Iterable
 
 import optuna
@@ -15,6 +17,7 @@ from rungrid.plumbing import CopyingMultiSink, Empty, MultiSource, Sink, Source
 from rungrid.plumbing.storage import CSVSink
 
 _RGRC_PY = "rgrc.py"
+_TEMPLATES = Path(__file__).parent / "init-templates"
 
 
 class CLI(argparse.ArgumentParser):
@@ -94,6 +97,28 @@ class CLI(argparse.ArgumentParser):
                 ),
                 args.limit,
             )
+        )
+
+    def _subcommand_init(self, args):
+        template_folder = _TEMPLATES / args.template
+        dest_folder = Path(args.dir)
+
+        def _no_clobber_copy(
+            src: Path | str, dst: Path | str, *, follow_symlinks: bool = True
+        ) -> None:
+            src = Path(src)
+            dst = Path(dst)
+            if dst.exists():
+                print("not overwriting", str(dst), file=sys.stderr)
+            else:
+                shutil.copyfile(src, dst, follow_symlinks=follow_symlinks)
+                print("wrote", str(dst))
+
+        shutil.copytree(
+            template_folder,
+            dest_folder,
+            dirs_exist_ok=True,
+            copy_function=_no_clobber_copy,
         )
 
     def _subcommand_run(self, args):
@@ -237,3 +262,18 @@ class CLI(argparse.ArgumentParser):
             help="pump trials from sources to sinks (can be used for exporting)",
         )
         pump.set_defaults(rg_subcommand_fn=self._subcommand_pump)
+        init = subparsers.add_parser(
+            "rg-init", help="initialize current directory with a template"
+        )
+        init.add_argument(
+            "-d", "--dir", help="which directory to initialize", type=str, default="."
+        )
+        init.add_argument(
+            "-t",
+            "--template",
+            help="which template to use",
+            type=str,
+            default="default",
+            choices=sorted(x.name for x in _TEMPLATES.iterdir()),
+        )
+        init.set_defaults(rg_subcommand_fn=self._subcommand_init)
