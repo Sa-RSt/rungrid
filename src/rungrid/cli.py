@@ -75,12 +75,24 @@ class CLI(argparse.ArgumentParser):
         def command_line_predicate(t: Trial) -> bool:
             return eval(predicate_code, rgrc, {"trial": t})
 
+        def limited_generator(g: Iterable, limit: int):
+            it = iter(g)
+            while limit != 0:
+                limit -= 1
+                try:
+                    yield next(it)
+                except StopIteration:
+                    return None
+
         return tqdm(
-            filter(
-                command_line_predicate,
-                source.get_trials(
-                    finished=status_to_finished[args.status], search_tag=args.tag
+            limited_generator(
+                filter(
+                    command_line_predicate,
+                    source.get_trials(
+                        finished=status_to_finished[args.status], search_tag=args.tag
+                    ),
                 ),
+                args.limit,
             )
         )
 
@@ -183,6 +195,14 @@ class CLI(argparse.ArgumentParser):
             help="use a Python expression as a predicate to filter read trials; the name `trial` is"
             + " available to get the trial, alongside the names declared in rgrc.py",
             default="True",
+        )
+        self.add_argument(
+            "-L",
+            "--limit",
+            type=int,
+            required=False,
+            help="read at most this many trials; if negative or unspecified, read until exhaustion (potentially forever).",
+            default=-1,
         )
         run = subparsers.add_parser(
             "rg-run",
