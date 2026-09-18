@@ -729,7 +729,7 @@ class ExperimentRegistry:
         """
         if exp.name in self._experiments_by_name.keys():
             raise StructureError(
-                f'non-unique experiment name "{exp.name}". Do you have'
+                f'non-unique experiment name "{exp.name}". Do you have '
                 + "multiple subclasses of Experiment with the same name?"
             )
         assert exp.identifier not in self._experiments_by_ident.keys()
@@ -772,7 +772,7 @@ class Experiment(ABC, Generic[T]):
     def __init__(self) -> None:
         """Initialize the Experiment and register its step methods.
 
-        Automatically inspects instance attributes for methods whose names start with ``step_``,
+        Automatically inspects class attributes for methods decorated with `@step_method`,
         registering them as ExperimentStep metadata.
         """
         self._steps: dict[str, ExperimentStep] = {}
