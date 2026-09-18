@@ -33,7 +33,7 @@ class CLI(argparse.ArgumentParser):
 
     def _get_source(self, args, *extra_sources: Source) -> Source:
         rgrc = self._get_rgrc_environment()
-        sources_code: list[str] = args.source + args.source_sink
+        sources_code: list[str] = (args.source or []) + (args.source_sink or [])
         sources = [eval(x, rgrc) for x in sources_code]
         for expr, source in zip(sources_code, sources):
             if not isinstance(source, Source):
@@ -50,7 +50,7 @@ class CLI(argparse.ArgumentParser):
 
     def _get_sink(self, args, *extra_sinks: Sink) -> Sink:
         rgrc = self._get_rgrc_environment()
-        sinks_code: list[str] = args.sink + args.source_sink
+        sinks_code: list[str] = (args.sink or []) + (args.source_sink or [])
         sinks = [eval(x, rgrc) for x in sinks_code]
         for expr, sink in zip(sinks_code, sinks):
             if not isinstance(sink, Sink):
