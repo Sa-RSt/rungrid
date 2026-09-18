@@ -80,10 +80,12 @@ class BucketFileStorage(Sink, Source):
         super().__init__()
         self._finished_dir = Path(finished_dir)
         self._unfinished_dir = Path(unfinished_dir)
+        self._finished_dir.mkdir(parents=True, exist_ok=True)
+        self._unfinished_dir.mkdir(parents=True, exist_ok=True)
         self._lock_factory = lock_factory
         self._io_workers = ThreadPoolExecutor(os.cpu_count())
         if isinstance(serializing_backend, str):
-            self._ld = LoaderDumper.make(serializing_backend, (), (), {}, {})
+            self._ld = LoaderDumper.make(serializing_backend, (), {}, (), {})
         elif isinstance(serializing_backend, LoaderDumper):
             self._ld = serializing_backend
         else:
