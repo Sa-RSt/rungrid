@@ -189,11 +189,11 @@ class CLI(argparse.ArgumentParser):
             help="run an experiment",
         )
         run.add_argument(
-            "class-name-or-scheduler",
+            "class_name",
+            metavar="class-name-or-scheduler",
             type=str,
             help="the name of the subclass of Experiment OR the Scheduler instance to use "
             + rgrc_help,
-            required=True,
         )
         run.add_argument(
             "-A",
