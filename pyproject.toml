@@ -5,20 +5,15 @@ description = "A framework for running and managing experiments"
 readme = "README.md"
 authors = [{ name = "Sa-RSt", email = "sasha.rodelasteidle@gmail.com" }]
 requires-python = ">=3.10"
-dependencies = [
-    "joblib>=1.5.3",
-    "optuna>=4.9.0",
-    "tqdm>=4.70.0",
-]
+dependencies = ["joblib>=1.5.3", "optuna>=4.9.0", "tqdm>=4.70.0"]
 
-[project.optional-dependencies]
-torch = ["torch"]
+[project.scripts]
+rungrid = "rungrid:main"
+
 
 [build-system]
 requires = ["uv_build>=0.9.29,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = [
-    "pytest>=9.1.1",
-]
+dev = ["pytest==9.1.1"]
