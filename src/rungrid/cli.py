@@ -2,9 +2,9 @@
 
 import argparse
 import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
-import sys
 from typing import Any, Iterable
 
 import optuna
@@ -22,6 +22,12 @@ _TEMPLATES = Path(__file__).parent / "init-templates"
 
 class CLI(argparse.ArgumentParser):
     """Command-line interface runner and argument parser for configuring and executing experiments."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize this CLI with the same arguments as argparse.ArgumentParser."""
+        super().__init__(*args, **kwargs)
+        self.rgrc_help = f"(must be declared or imported in {_RGRC_PY})"
+        self.rgrc_ctx_help = f"(will be run in the context of {_RGRC_PY})"
 
     def _get_rgrc_environment(self) -> dict[str, Any]:
         rgrc = getattr(self, "_rgrc", None)
@@ -163,107 +169,25 @@ class CLI(argparse.ArgumentParser):
 
     def add_rungrid_args(self) -> None:
         """Add predefined rungrid arguments and subparsers to the parser."""
-        rgrc_help = f"(must be declared or imported in {_RGRC_PY})"
-        rgrc_ctx_help = f"(will be run in the context of {_RGRC_PY})"
         subparsers = self.add_subparsers(
-            help="rungrid predefined subcommands", required=True
-        )
-        self.add_argument(
-            "-I",
-            "--source",
-            action="append",
-            help="use the given Python expression as a source for trials "
-            + rgrc_ctx_help
-            + ", can be specified multiple times to create a MultiSource",
-        )
-        self.add_argument(
-            "-O",
-            "--sink",
-            action="append",
-            help="use the given Python expression as a sink for trials "
-            + rgrc_ctx_help
-            + ", can be specified multiple times to create a CopyingMultiSink",
-        )
-        self.add_argument(
-            "-S",
-            "--source-sink",
-            action="append",
-            help="equivalent to --source X --sink X",
-        )
-        self.add_argument(
-            "-C",
-            "--csv-sink",
-            type=argparse.FileType("w"),
-            required=False,
-            default=None,
-            help="put trials in the given file using CSVSink;"
-            + " implies the creation of a CopyingMultiSink if used alongside --sink",
-        )
-        self.add_argument(
-            "-F",
-            "--status",
-            choices=["finished", "unfinished"],
-            help="read only finished/unfinished trials",
-            default=None,
-        )
-        self.add_argument(
-            "-T",
-            "--tag",
-            type=str,
-            help="read only trials that have a given tag",
-            default=None,
-        )
-        self.add_argument(
-            "-P",
-            "--predicate",
-            type=str,
-            help="use a Python expression as a predicate to filter read trials; the name `trial` is"
-            + " available to get the trial, alongside the names declared in rgrc.py",
-            default="True",
-        )
-        self.add_argument(
-            "-L",
-            "--limit",
-            type=int,
-            required=False,
-            help="read at most this many trials; if negative or unspecified, read until exhaustion (potentially forever).",
-            default=-1,
+            help="rungrid predefined subcommands. run [subcommand] --help for more information on a specific subcommand",
+            required=True,
         )
         run = subparsers.add_parser(
-            "rg-run",
+            "run",
             help="run an experiment",
         )
-        run.add_argument(
-            "class_name",
-            metavar="class-name-or-scheduler",
-            type=str,
-            help="the name of the subclass of Experiment OR the Scheduler instance to use "
-            + rgrc_help,
-        )
-        run.add_argument(
-            "-A",
-            "--cache-dir",
-            type=str,
-            help="the directory in which to store cache of step results",
-            default=".rg-cache",
-        )
-        run.add_argument(
-            "-M",
-            "--study-factory",
-            type=str,
-            required=False,
-            help='name of the Optuna Study factory function to use, such as "study_factory" (default: don\'t use Optuna) '
-            + rgrc_help,
-            default=None,
-        )
+        self._add_source_sink_args(run)
+        self._add_runner_args(run)
         run.set_defaults(rg_subcommand_fn=self._subcommand_run)
         pump = subparsers.add_parser(
-            "rg-pump",
+            "pump",
             help="pump trials from sources to sinks (can be used for exporting)",
         )
+        self._add_source_sink_args(pump)
         pump.set_defaults(rg_subcommand_fn=self._subcommand_pump)
         init = subparsers.add_parser(
-            "rg-init", help="initialize current directory with a template"
+            "init", help="initialize current directory with a template"
         )
         init.add_argument(
             "-d", "--dir", help="which directory to initialize", type=str, default="."
@@ -277,3 +201,91 @@ class CLI(argparse.ArgumentParser):
             choices=sorted(x.name for x in _TEMPLATES.iterdir()),
         )
         init.set_defaults(rg_subcommand_fn=self._subcommand_init)
+
+    def _add_source_sink_args(self, subparser) -> None:
+        subparser.add_argument(
+            "-i",
+            "--source",
+            action="append",
+            help="use the given Python expression as a source for trials "
+            + self.rgrc_ctx_help
+            + ", can be specified multiple times to create a MultiSource",
+        )
+        subparser.add_argument(
+            "-o",
+            "--sink",
+            action="append",
+            help="use the given Python expression as a sink for trials "
+            + self.rgrc_ctx_help
+            + ", can be specified multiple times to create a CopyingMultiSink",
+        )
+        subparser.add_argument(
+            "-S",
+            "--source-sink",
+            action="append",
+            help="equivalent to --source X --sink X",
+        )
+        subparser.add_argument(
+            "-C",
+            "--csv-sink",
+            type=argparse.FileType("w"),
+            required=False,
+            default=None,
+            help="put trials in the given file using CSVSink;"
+            + " implies the creation of a CopyingMultiSink if used alongside --sink",
+        )
+        subparser.add_argument(
+            "-F",
+            "--status",
+            choices=["finished", "unfinished"],
+            help="read only finished/unfinished trials",
+            default=None,
+        )
+        subparser.add_argument(
+            "-T",
+            "--tag",
+            type=str,
+            help="read only trials that have a given tag",
+            default=None,
+        )
+        subparser.add_argument(
+            "-P",
+            "--predicate",
+            type=str,
+            help="use a Python expression as a predicate to filter read trials; the name `trial` is"
+            + " available to get the trial, alongside the names declared in rgrc.py",
+            default="True",
+        )
+        subparser.add_argument(
+            "-L",
+            "--limit",
+            type=int,
+            required=False,
+            help="read at most this many trials; if negative or unspecified, read until exhaustion (potentially forever).",
+            default=-1,
+        )
+
+    def _add_runner_args(self, subparser):
+        subparser.add_argument(
+            "class_name",
+            metavar="class-name-or-scheduler",
+            type=str,
+            help="the name of the subclass of Experiment OR the Scheduler instance to use "
+            + self.rgrc_help,
+        )
+        subparser.add_argument(
+            "-A",
+            "--cache-dir",
+            type=str,
+            help="the directory in which to store cache of step results",
+            default=".rg-cache",
+        )
+        subparser.add_argument(
+            "-M",
+            "--study-factory",
+            type=str,
+            required=False,
+            help='name of the Optuna Study factory function to use, such as "study_factory" (default: don\'t use Optuna) '
+            + self.rgrc_help,
+            default=None,
+        )

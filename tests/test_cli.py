@@ -15,7 +15,7 @@ def run_in_tmp_dir(tmp_path):
 
 
 def test_cli_run_subcommand(run_in_tmp_dir):
-    """Verify that CLI parses arguments and executes the rg-run subcommand inside a tmp dir."""
+    """Verify that CLI parses arguments and executes the run subcommand inside a tmp dir."""
     rgrc_content = """
 from rungrid.experiment import Experiment, VarNamespace, step_method
 from rungrid.plumbing import Empty
@@ -41,7 +41,7 @@ class CliDummyExperiment(Experiment):
         f.write(rgrc_content)
 
     cli = CLI()
-    cli.run(["-I", "my_source", "-O", "my_sink", "rg-run", "CliDummyExperiment"])
+    cli.run(["run", "-i", "my_source", "-o", "my_sink", "CliDummyExperiment"])
 
     from rungrid.experiment import ExperimentRegistry
 
@@ -52,7 +52,7 @@ class CliDummyExperiment(Experiment):
 
 
 def test_cli_pump_subcommand(run_in_tmp_dir):
-    """Verify that rg-pump command-line subcommand transfers filtered/unfiltered trials from source to sink."""
+    """Verify that the pump command-line subcommand transfers filtered/unfiltered trials from source to sink."""
     rgrc_content = """
 from uuid import uuid4
 from rungrid.experiment import VarNamespace, StaleTrial
@@ -86,7 +86,7 @@ snk = SimpleSink()
 
     cli = CLI()
     # Pump only trials tagged with "pass"
-    cli.run(["-I", "src", "-O", "snk", "-T", "pass", "rg-pump"])
+    cli.run(["pump", "-i", "src", "-o", "snk", "-T", "pass"])
 
     # Load rgrc environment to verify the simple sink has trials
     rgrc = cli._get_rgrc_environment()
@@ -121,7 +121,7 @@ src = SimpleSource([t1_with_res])
         f.write(rgrc_content)
 
     cli = CLI()
-    cli.run(["-I", "src", "-C", "results.csv", "rg-pump"])
+    cli.run(["pump", "-i", "src", "-C", "results.csv"])
 
     assert os.path.exists("results.csv")
     with open("results.csv", "r") as f:
@@ -168,14 +168,14 @@ class OptunaCliExperiment(Experiment):
     # Run with -L 1 limit
     cli.run(
         [
-            "-O",
+            "run",
+            "-o",
             "my_sink",
             "-L",
             "1",
-            "rg-run",
-            "OptunaCliExperiment",
             "-M",
             "my_study_factory",
+            "OptunaCliExperiment",
         ]
     )
 
@@ -223,7 +223,7 @@ my_scheduler = LocalDispatcher.make_default(SchedCliExperiment(), ".rg-cache-tes
         f.write(rgrc_content)
 
     cli = CLI()
-    cli.run(["-I", "my_source", "-O", "my_sink", "rg-run", "my_scheduler"])
+    cli.run(["run", "-i", "my_source", "-o", "my_sink", "my_scheduler"])
 
     rgrc = cli._get_rgrc_environment()
     assert "my_scheduler" in rgrc
