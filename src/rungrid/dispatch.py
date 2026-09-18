@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from joblib import Memory, Parallel
+from joblib import Memory, Parallel, delayed
 from typing_extensions import Self
 
 from rungrid.error import StructureError
@@ -110,7 +110,7 @@ class LocalDispatcher(Scheduler):
         :return: An iterable of executed, completed Trial objects.
         :rtype: collections.abc.Iterable[Trial]
         """
-        return self._job(self.run(x) for x in trials)  # type: ignore
+        return self._job(delayed(self.run)(x) for x in trials)  # type: ignore
 
     def get_experiment(self) -> Experiment:
         """Get the experiment instance associated with this dispatcher.
