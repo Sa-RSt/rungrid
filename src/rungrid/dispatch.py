@@ -6,12 +6,13 @@ import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
+from uuid import uuid4
 
 from joblib import Memory, Parallel, delayed
 from typing_extensions import Self
 
-from rungrid.error import StructureError
+from rungrid.error import FatalRungridError, StructureError
 from rungrid.experiment import (
     Experiment,
     ExperimentRegistry,
@@ -19,9 +20,11 @@ from rungrid.experiment import (
     SignalDone,
     SignalNextStep,
     SignalPrune,
+    StaleTrial,
     StepRecord,
     Trial,
     TrialResult,
+    VarNamespace,
 )
 
 
@@ -131,7 +134,9 @@ class LocalDispatcher(Scheduler):
         kwargs = {}
         current_step = self._experiment._get_first_step()
         while not trial.is_finished():
-            trial, current_step, kwargs = run_step(current_step, trial, **kwargs)
+            trial, current_step, kwargs = run_step(
+                current_step, trial, self._mem, **kwargs
+            )
         assert trial.result is not None
         return trial
 
@@ -150,8 +155,64 @@ def _experiment_from_step(step: ExperimentStep) -> Experiment:
     return experiment
 
 
+def _cached_step_execution(
+    step_name: str, variables: tuple, step_kwargs: dict
+) -> tuple[str, Any]:
+    reg = ExperimentRegistry.get_instance()
+    step_obj = None
+    for exp in reg._experiments_by_name.values():
+        if step_name in exp.steps:
+            step_obj = exp.steps[step_name]
+            break
+    if step_obj is None:
+        raise StructureError(
+            f"Step {step_name} not found in any registered experiments."
+        )
+
+    v_dict = dict(variables)
+    v_names = set(v_dict.keys())
+    v = VarNamespace(v_names)
+    v._variables_dict = v_dict
+    trial = StaleTrial(0, uuid4(), v)
+
+    try:
+        res = step_obj.fn(trial, **step_kwargs)
+        return ("done", res)
+    except SignalDone as e:
+        return ("done", e.result)
+    except SignalNextStep as e:
+        return ("next_step", (e.next_step.name, e.kwargs))
+    except SignalPrune as e:
+        return ("prune", e.reason)
+    except Exception as e:
+        return ("error", e)
+
+
+def _run_cacheable_step_fn(
+    cache_provider: Memory, step: ExperimentStep, trial: Trial, kwargs: dict
+) -> NoReturn:
+    variables_state = tuple(sorted(trial.v._variables_dict.items()))
+    cached_runner = cache_provider.cache(_cached_step_execution)
+    outcome: tuple[str, Any] = cached_runner(step.name, variables_state, kwargs)  # type: ignore
+
+    if outcome[0] == "done":
+        raise SignalDone(outcome[1])
+    elif outcome[0] == "next_step":
+        reg = ExperimentRegistry.get_instance()
+        experiment = reg.get_by_name(step.experiment_name)
+        assert experiment is not None
+        next_step_name, next_step_kwargs = outcome[1]
+        next_step_obj = experiment.steps[next_step_name]
+        raise SignalNextStep(next_step_obj, next_step_kwargs)
+    elif outcome[0] == "prune":
+        raise SignalPrune(outcome[1])
+    elif outcome[0] == "error":
+        raise outcome[1]
+    raise FatalRungridError(outcome)
+
+
 def run_step(
-    step: ExperimentStep, trial: Trial, **kwargs
+    step: ExperimentStep, trial: Trial, cache_provider: Memory | None = None, **kwargs
 ) -> tuple[Trial, ExperimentStep | None, dict[str, Any] | None]:
     """Execute a single experiment step for a trial.
 
@@ -162,6 +223,8 @@ def run_step(
     :type step: ExperimentStep
     :param trial: The active trial executing the step.
     :type trial: Trial
+    :param cache_provider: The joblib Memory instance used for caching.
+    :type cache_provider: joblib.Memory | None
     :param kwargs: Additional arguments to pass to the step function.
     :return: A tuple containing:
         - The updated trial instance.
@@ -172,6 +235,8 @@ def run_step(
     experiment = _experiment_from_step(step)
     start = datetime.datetime.now()
     try:
+        if step.cacheable and cache_provider is not None:
+            _run_cacheable_step_fn(cache_provider, step, trial, kwargs)
         res = step.fn(trial, **kwargs)
         raise SignalDone(res)
     except SignalDone as e:
