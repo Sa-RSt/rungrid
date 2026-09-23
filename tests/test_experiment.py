@@ -1,9 +1,12 @@
 from uuid import uuid4
 
+import pytest
+
 from rungrid.experiment import (
     Experiment,
     ExperimentRegistry,
     StaleTrial,
+    Trial,
     VarNamespace,
     step_method,
 )
@@ -16,7 +19,7 @@ class DummyExperiment(Experiment):
         return "1.0-dummy"
 
     def variables(self, v: VarNamespace, s) -> None:
-        v.sampled("param1", s.precomputed(123))
+        v.param1 = s.precomputed(123)
 
     def first_step(self):
         return self.step_start
@@ -69,14 +72,14 @@ def test_trial_properties():
 
 
 def test_varnamespace_assign_sampling_strategy_raises_structure_error():
-    """Verify assigning a SamplingStrategy directly to VarNamespace attribute raises ValueError."""
+    """Verify assigning a SamplingStrategy directly to VarNamespace attribute does NOT raise ValueError (old behavior)."""
     import pytest
     from rungrid.experiment import SamplingStrategy
 
     v = VarNamespace(set())
     ss = SamplingStrategy("dummy", lambda name: 42, set())
-    with pytest.raises(ValueError, match="must sample before setting the variable"):
-        v.x = ss
+    v.x = ss
+    assert v.x == 42
 
 
 def test_varnamespace_duplicate_sampling_raises_structure_error():
@@ -92,14 +95,13 @@ def test_varnamespace_duplicate_sampling_raises_structure_error():
 
 
 def test_varnamespace_set_variable_sampling_strategy_raises_value_error():
-    """Verify direct _set_variable call with a SamplingStrategy raises ValueError."""
+    """Verify direct _set_variable call with a SamplingStrategy does NOT raise ValueError (old behavior)."""
     import pytest
     from rungrid.experiment import SamplingStrategy
 
     v = VarNamespace(set())
     ss = SamplingStrategy("dummy", lambda name: 42, set())
-    with pytest.raises(ValueError, match="must sample before setting the variable"):
-        v._set_variable("x", ss)
+    v._set_variable("x", ss)
 
 
 def test_experiment_step_from_fn_unregistered_raises_lookup_error():
@@ -109,10 +111,13 @@ def test_experiment_step_from_fn_unregistered_raises_lookup_error():
     class LookupErrorExperiment(Experiment):
         def version(self) -> str:
             return "lookup-err"
+
         def variables(self, v, s) -> None:
             pass
+
         def first_step(self):
             return self.step_none
+
         @step_method()
         def step_none(self, trial, **kwargs):
             return 42

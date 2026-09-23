@@ -8,7 +8,7 @@ from rungrid.version import version_from_git_commit_hash
 
 class FiveSolver(Experiment):
     def variables(self, v: VarNamespace, s: Sampler) -> None:
-        v.sampled("x", s.transformed(s.uniform(-pi / 2 + 1e-6, pi / 2 - 1e-6), tan))
+        v.x = s.transformed(s.uniform(-pi / 2 + 1e-6, pi / 2 - 1e-6), tan)
 
     def version(self) -> str:
         return version_from_git_commit_hash(type(self))

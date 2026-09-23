@@ -18,7 +18,7 @@ class OptimizeDummyExperiment(Experiment):
         return "1.0-dummy"
 
     def variables(self, v: VarNamespace, s) -> None:
-        v.sampled("param1", s.precomputed(123))
+        v.param1 = s.precomputed(123)
 
     def first_step(self):
         return self.step_start
@@ -84,8 +84,8 @@ def test_optimize_pipeline(tmp_path):
 
         def variables(self, v: VarNamespace, s) -> None:
             # Declare variables using precomputed and Optuna suggestion
-            v.sampled("val1", s.uniform(10.0, 20.0))
-            v.sampled("val2", s.precomputed("const_val"))
+            v.val1 = s.uniform(10.0, 20.0)
+            v.val2 = s.precomputed("const_val")
 
         def first_step(self):
             return self.step_one

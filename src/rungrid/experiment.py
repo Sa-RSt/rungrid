@@ -416,9 +416,11 @@ class VarNamespace:
         return vn
 
     def __setattr__(self, name: str, value: Any, /) -> None:
-        """Assign a constant value to a variable in this namespace.
+        """Assign a value to a variable in this namespace.
 
-        This automatically creates a precomputed SamplingStrategy under the hood.
+        If a SamplingStrategy is given, it is sampled, and the result
+        is stored instead of the SamplingStrategy object. Otherwise,
+        a precomputed SamplingStrategy is created and sampled under the hood.
 
         :param name: The name of the variable to set.
         :type name: str
@@ -427,9 +429,11 @@ class VarNamespace:
         """
         if name.startswith("_"):
             super().__setattr__(name, value)
+        elif isinstance(value, SamplingStrategy):
+            self._sampled(name, value)
         else:
             ss = SamplingStrategy.make_precomputed(value, self._variable_names)
-            self.sampled(name, ss)
+            self._sampled(name, ss)
 
     def _set_variable(self, name: str, value: Any, /) -> None:
         if name in [
@@ -440,12 +444,6 @@ class VarNamespace:
             "_as_stale",
         ]:
             super().__setattr__(name, value)
-        elif isinstance(value, SamplingStrategy):
-            raise ValueError(
-                "must sample before setting the variable; "
-                + "try using VarNamespace.sampled('name', x) instead of VarNamespace.name = x, "
-                + "as the latter should only be used to set constant values"
-            )
         else:
             self._variables_dict[name] = value
 
@@ -486,7 +484,7 @@ class VarNamespace:
         """
         setattr(self, name, val)
 
-    def sampled(self, name: str, ss: SamplingStrategy) -> None:
+    def _sampled(self, name: str, ss: SamplingStrategy) -> None:
         """Register and sample a variable using a sampling strategy.
 
         :param name: The name of the variable to sample.

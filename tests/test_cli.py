@@ -28,7 +28,7 @@ class CliDummyExperiment(Experiment):
         return "cli-dummy-1.0"
 
     def variables(self, v: VarNamespace, s) -> None:
-        v.sampled("param1", s.precomputed(456))
+        v.param1= s.precomputed(456)
 
     def first_step(self):
         return self.step_start
@@ -152,7 +152,7 @@ class OptunaCliExperiment(Experiment):
         return "optuna-cli-1.0"
 
     def variables(self, v: VarNamespace, s) -> None:
-        v.sampled("val", s.uniform(0.0, 10.0))
+        v.val= s.uniform(0.0, 10.0)
 
     def first_step(self):
         return self.step_one
@@ -232,6 +232,7 @@ my_scheduler = LocalDispatcher.make_default(SchedCliExperiment(), ".rg-cache-tes
 def test_cli_jobs_configuration_multiple(run_in_tmp_dir):
     """Verify that CLI sets correct number of jobs in LocalDispatcher and creates multiple worker jobs."""
     from rungrid.experiment import ExperimentRegistry
+
     ExperimentRegistry.get_instance()._experiments_by_name.clear()
     ExperimentRegistry.get_instance()._experiments_by_ident.clear()
 
@@ -277,6 +278,7 @@ my_scheduler = LocalDispatcher.make_default(JobsMultipleCliExperiment(), ".rg-ca
 def test_cli_jobs_configuration_one(run_in_tmp_dir):
     """Verify that CLI sets n_jobs=1 in LocalDispatcher and uses SequentialBackend (no subprocesses)."""
     from rungrid.experiment import ExperimentRegistry
+
     ExperimentRegistry.get_instance()._experiments_by_name.clear()
     ExperimentRegistry.get_instance()._experiments_by_ident.clear()
 
@@ -353,16 +355,18 @@ snk2 = SimpleSink()
 
     cli1 = CLI()
     # Pump only trials with optuna_trial_number == 1
-    cli1.run(["pump", "-i", "src", "-o", "snk1", "-P", "trial.optuna_trial_number == 1"])
+    cli1.run(
+        ["pump", "-i", "src", "-o", "snk1", "-P", "trial.optuna_trial_number == 1"]
+    )
 
     cli2 = CLI()
     # Pump with a predicate that matches none
-    cli2.run(["pump", "-i", "src", "-o", "snk2", "-P", "trial.optuna_trial_number == 42"])
+    cli2.run(
+        ["pump", "-i", "src", "-o", "snk2", "-P", "trial.optuna_trial_number == 42"]
+    )
 
     rgrc1 = cli1._get_rgrc_environment()
     rgrc2 = cli2._get_rgrc_environment()
     assert len(rgrc1["snk1"].trials) == 1
     assert rgrc1["snk1"].trials[0].optuna_trial_number == 1
     assert len(rgrc2["snk2"].trials) == 0
-
-
