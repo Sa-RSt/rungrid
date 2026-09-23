@@ -51,6 +51,8 @@ class OptimizingSampler(Source, Sink):
             s = Sampler(optuna_trial)
             v = VarNamespace(s._variable_names)
             self._experiment.variables(v, s)
+            for strat in v._sampling_strategies.values():
+                strat.dispose()
             yield LiveTrial(optuna_trial, uuid4(), v)
 
     def consume_and_tag(
@@ -89,7 +91,6 @@ class OptimizingSampler(Source, Sink):
         if not trial.is_finished():
             return
         assert trial.result is not None
-
         res = trial.result
         if res.is_error:
             self._study.tell(

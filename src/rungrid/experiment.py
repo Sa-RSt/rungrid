@@ -100,12 +100,26 @@ class SamplingStrategy:
         :type variable_name: str
         :return: The sampled value.
         :rtype: typing.Any
-        :raises StructureError: If the variable name is not unique within the tracker.
+        :raises StructureError: If the variable name is not unique within the tracker or if this sampler
+        has been called more than once.
         """
         if variable_name in self._variable_names:
             raise StructureError(f'variable name "{variable_name}" is not unique')
         self._variable_names.add(variable_name)
-        return self._sample_fn(variable_name)
+        if self._sample_fn is None:
+            raise StructureError(
+                "this sampler has already been disposed; "
+                + "make sure all sampling is done inside the variables() method."
+            )
+        res = self._sample_fn(variable_name)
+        return res
+
+    def dispose(self) -> None:
+        """Make it so that this sampler can no longer be called.
+
+        This must be called before pickling.
+        """
+        self._sample_fn = None
 
 
 class Sampler:

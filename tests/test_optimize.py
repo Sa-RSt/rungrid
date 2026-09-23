@@ -113,3 +113,43 @@ def test_optimize_pipeline(tmp_path):
     assert 10.0 <= accessed_values[0] <= 20.0
     # Verify val2 is "const_val"
     assert accessed_values[1] == "const_val"
+
+
+def test_sampling_strategy_pickles_successfully(tmp_path):
+    """Ensure SamplingStrategy objects are disposed"""
+    import itertools
+    import optuna
+    import pickle
+    from rungrid.optimize import OptimizingSampler
+    from rungrid.dispatch import LocalDispatcher
+
+    # Keep track of accessed variable values inside the step
+    vns = []
+
+    class OptimizePicklesSuccessfullyExperiment(Experiment):
+        def version(self) -> str:
+            return "1.0-pickles"
+
+        def variables(self, v: VarNamespace, s) -> None:
+            # Declare variables using precomputed and Optuna suggestion
+            v.val1 = s.uniform(10.0, 20.0)
+            v.val2 = s.precomputed("const_val")
+            v.vec = s.list(s.uniform(-1.0, 1.0), 32)
+            vns.append(v)
+
+        def first_step(self):
+            return self.step_one
+
+        @step_method()
+        def step_one(self, trial, **kwargs):
+            return "done"
+
+    study = optuna.create_study(direction="minimize")
+    exp = OptimizePicklesSuccessfullyExperiment()
+    sampler = OptimizingSampler(exp, study)
+    dispatcher = LocalDispatcher.make_default(exp, tmp_path)
+
+    trials = list(itertools.islice(sampler.get_trials(), 32))
+    list(dispatcher.schedule(trials))
+    for v in vns:
+        pickle.dumps(v)
