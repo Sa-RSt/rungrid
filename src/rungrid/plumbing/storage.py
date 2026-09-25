@@ -338,7 +338,17 @@ class CSVSink(Sink):
 
 
 class InMemoryStorage(Source, Sink):
+    """An in-memory implementation of both Source and Sink.
+
+    Stores trial records directly in a list in-memory.
+    """
+
     def __init__(self, trials: list[Trial] | None = None) -> None:
+        """Initialize InMemoryStorage with an optional list of trials.
+
+        :param trials: An optional list of existing Trial objects to initialize with.
+        :type trials: list[Trial] | None
+        """
         super().__init__()
         if trials is None:
             trials = []
@@ -348,6 +358,15 @@ class InMemoryStorage(Source, Sink):
     def get_trials(
         self, *, finished: bool | None = None, search_tag: str | None = None
     ) -> Iterable[Trial]:
+        """Retrieve stored trials matching specified filters.
+
+        :param finished: Filter by finished state (True for completed, False for ongoing, None for all).
+        :type finished: bool | None
+        :param search_tag: Optional tag string to filter trials.
+        :type search_tag: str | None
+        :return: An iterable of stored Trial instances matching the filters.
+        :rtype: collections.abc.Iterable[Trial]
+        """
         for trial in list(self.trials):
             if finished is not None and finished != trial.is_finished():
                 continue
@@ -363,6 +382,19 @@ class InMemoryStorage(Source, Sink):
         search_tag: str | None = None,
         predicate: PredicateType = lambda _: True,
     ) -> Trial | None:
+        """Atomically find, tag, and return a matching trial from storage.
+
+        :param applied_tag: The tag to apply to the trial.
+        :type applied_tag: str
+        :param finished: Filter by finished state.
+        :type finished: bool | None
+        :param search_tag: Optional tag string filter.
+        :type search_tag: str | None
+        :param predicate: Additional filter function returning True for acceptable trials.
+        :type predicate: PredicateType
+        :return: The selected and tagged Trial, or None if no match is found.
+        :rtype: Trial | None
+        """
         with self._lock:
             for trial in self.trials:
                 if finished is not None and finished != trial.is_finished():
@@ -377,9 +409,19 @@ class InMemoryStorage(Source, Sink):
                 return trial
 
     def put_trial(self, trial: Trial) -> None:
+        """Append a trial to the stored list.
+
+        :param trial: The trial to store.
+        :type trial: Trial
+        """
         self.trials.append(trial)
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
+        """Append multiple trials to the stored list.
+
+        :param trials: A sequence of trials to store.
+        :type trials: collections.abc.Sequence[Trial]
+        """
         self.trials.extend(trials)
 
     def __repr__(self) -> str:
