@@ -77,10 +77,14 @@ class CLI(argparse.ArgumentParser):
         else:
             return CopyingMultiSink(sinks)
 
-    def _get_source_trial_iter(self, source: Source, args) -> Iterable[Trial]:
+    def _get_source_trial_iter(
+        self, source: Source, args, finished: bool | None
+    ) -> Iterable[Trial]:
         rgrc = self._get_rgrc_environment()
         predicate_code = compile(args.predicate, "<string>", "eval")
         status_to_finished = {"finished": True, "unfinished": False, None: None}
+        args_finished = status_to_finished[args.status]
+        finished_query = finished if args_finished is None else args_finished
 
         def command_line_predicate(t: Trial) -> bool:
             return eval(predicate_code, rgrc, {"trial": t})
@@ -98,12 +102,11 @@ class CLI(argparse.ArgumentParser):
             limited_generator(
                 filter(
                     command_line_predicate,
-                    source.get_trials(
-                        finished=status_to_finished[args.status], search_tag=args.tag
-                    ),
+                    source.get_trials(finished=finished_query, search_tag=args.tag),
                 ),
                 args.limit,
-            )
+            ),
+            unit="tl",
         )
 
     def _subcommand_init(self, args):
@@ -151,14 +154,14 @@ class CLI(argparse.ArgumentParser):
                 sampler = OptimizingSampler(experiment, study)
                 source = self._get_source(args, sampler)
                 sink = self._get_sink(args, sampler)
-            it = self._get_source_trial_iter(source, args)
+            it = self._get_source_trial_iter(source, args, finished=False)
             for trial in sched.schedule(it):
                 sink.put_trial(trial)
 
     def _subcommand_pump(self, args):
         source = self._get_source(args)
         sink = self._get_sink(args)
-        for trial in self._get_source_trial_iter(source, args):
+        for trial in self._get_source_trial_iter(source, args, finished=None):
             sink.put_trial(trial)
 
     def run(self, args):

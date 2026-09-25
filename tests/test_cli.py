@@ -17,11 +17,29 @@ def run_in_tmp_dir(tmp_path):
 def test_cli_run_subcommand(run_in_tmp_dir):
     """Verify that CLI parses arguments and executes the run subcommand inside a tmp dir."""
     rgrc_content = """
-from rungrid.experiment import Experiment, VarNamespace, step_method
-from rungrid.plumbing import Empty
+from uuid import uuid4
+from rungrid.experiment import Experiment, VarNamespace, step_method, StaleTrial, TrialResult
+from rungrid.plumbing import Empty, Source, Sink
+import datetime
 
-my_source = Empty()
-my_sink = Empty()
+
+class SimpleSource(Source):
+    def __init__(self, trials):
+        self.trials = list(trials)
+    def get_trials(self, *, search_tag=None, **kwargs):
+        if search_tag:
+            return [t for t in self.trials if search_tag in t.tags]
+        return self.trials
+    def consume_and_tag(self, applied_tag, **kwargs):
+        pass
+
+
+class SimpleSink(Sink):
+    def __init__(self):
+        self.trials = []
+    def put_trial(self, trial):
+        self.trials.append(trial)
+
 
 class CliDummyExperiment(Experiment):
     def version(self) -> str:
@@ -36,6 +54,16 @@ class CliDummyExperiment(Experiment):
     @step_method()
     def step_start(self, trial, **kwargs):
         return "cli-done"
+
+
+v = VarNamespace(set())
+my_source = SimpleSource([
+    StaleTrial(1, uuid4(), v).with_result(TrialResult.make_ok(1, datetime.datetime.now())),
+    StaleTrial(2, uuid4(), v),
+    StaleTrial(3, uuid4(), v).with_result(TrialResult.make_error(Exception(), datetime.datetime.now())),
+    StaleTrial(4, uuid4(), v),
+])
+my_sink = SimpleSink()
 """
     with open("rgrc.py", "w") as f:
         f.write(rgrc_content)
@@ -50,13 +78,18 @@ class CliDummyExperiment(Experiment):
     assert exp is not None
     assert exp.name == "CliDummyExperiment"
 
+    rgrc = cli._get_rgrc_environment()
+    sink_instance = rgrc["my_sink"]
+    assert [x.optuna_trial_number for x in sink_instance.trials] == [2, 4]
+
 
 def test_cli_pump_subcommand(run_in_tmp_dir):
     """Verify that the pump command-line subcommand transfers filtered/unfiltered trials from source to sink."""
     rgrc_content = """
 from uuid import uuid4
-from rungrid.experiment import VarNamespace, StaleTrial
+from rungrid.experiment import VarNamespace, StaleTrial, TrialResult
 from rungrid.plumbing import Source, Sink
+import datetime
 
 class SimpleSource(Source):
     def __init__(self, trials):
@@ -75,10 +108,11 @@ class SimpleSink(Sink):
         self.trials.append(trial)
 
 v = VarNamespace(set())
-trial_ok = StaleTrial(1, uuid4(), v, tags={"pass"})
-trial_fail = StaleTrial(2, uuid4(), v, tags={"fail"})
+trial_ok_result = StaleTrial(1, uuid4(), v, tags={"pass"}).with_result(TrialResult.make_ok(1, datetime.datetime.now()))
+trial_ok_noresult = StaleTrial(2, uuid4(), v, tags={"pass"})
+trial_fail = StaleTrial(3, uuid4(), v, tags={"fail"})
 
-src = SimpleSource([trial_ok, trial_fail])
+src = SimpleSource([trial_ok_result, trial_ok_noresult, trial_fail])
 snk = SimpleSink()
 """
     with open("rgrc.py", "w") as f:
@@ -91,8 +125,8 @@ snk = SimpleSink()
     # Load rgrc environment to verify the simple sink has trials
     rgrc = cli._get_rgrc_environment()
     sink_instance = rgrc["snk"]
-    assert len(sink_instance.trials) == 1
-    assert "pass" in sink_instance.trials[0].tags
+    assert len(sink_instance.trials) == 2
+    assert all("pass" in t.tags for t in sink_instance.trials)
 
 
 def test_cli_csv_sink(run_in_tmp_dir):
@@ -325,7 +359,7 @@ def test_cli_pump_with_predicate(run_in_tmp_dir):
     """Verify that the CLI pump subcommand filters trials using a custom python expression via --predicate."""
     rgrc_content = """
 from uuid import uuid4
-from rungrid.experiment import VarNamespace, StaleTrial
+from rungrid.experiment import VarNamespace, StaleTrial, TrialResult
 from rungrid.plumbing import Source, Sink
 
 class SimpleSource(Source):
