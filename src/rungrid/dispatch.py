@@ -110,10 +110,11 @@ class LocalDispatcher(Scheduler):
 
         :param trials: An iterable of trials to be scheduled and run.
         :type trials: collections.abc.Iterable[Trial]
-        :return: An iterable of executed, completed Trial objects.
+        :return: An iterable of executed, potentially uncompleted Trial objects.
         :rtype: collections.abc.Iterable[Trial]
         """
-        return self._job(delayed(self.run)(x) for x in trials)  # type: ignore
+        for it in self._job(delayed(self.run)(x) for x in trials):
+            yield from it  # type: ignore
 
     def get_experiment(self) -> Experiment:
         """Get the experiment instance associated with this dispatcher.
@@ -123,22 +124,36 @@ class LocalDispatcher(Scheduler):
         """
         return self._experiment
 
-    def run(self, trial: Trial) -> Trial:
+    def run(self, trial: Trial) -> Iterable[Trial]:
         """Execute a single trial sequentially through all its steps until finished.
 
         :param trial: The trial instance to run.
         :type trial: Trial
-        :return: The finished trial instance containing the final result.
+        :return: An iterable with the trial updated after each step.
         :rtype: Trial
         """
-        kwargs = {}
-        current_step = self._experiment._get_first_step()
+        recovery = self._recover_last_step_kwargs(trial)
+        if recovery is None:
+            current_step = self._experiment._get_first_step()
+            kwargs = {}
+        else:
+            current_step, kwargs = recovery
         while not trial.is_finished():
             trial, current_step, kwargs = run_step(
                 current_step, trial, self._mem, **kwargs
             )
-        assert trial.result is not None
-        return trial
+            yield trial
+
+    def _recover_last_step_kwargs(
+        self, trial: Trial
+    ) -> tuple[ExperimentStep, dict] | None:
+        if trial.step_records:
+            last = trial.step_records[-1]
+            if last.next_step_name is not None and last.next_step_kwargs is not None:
+                current_step = self._experiment.steps[last.next_step_name]
+                kwargs = last.next_step_kwargs.copy()
+                return current_step, kwargs
+        return None
 
 
 def _experiment_from_step(step: ExperimentStep) -> Experiment:
