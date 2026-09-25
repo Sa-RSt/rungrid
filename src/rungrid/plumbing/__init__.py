@@ -161,8 +161,10 @@ class LoaderDumper:
         :rtype: LoaderDumper
         """
         if importlib.util.find_spec("torch") is not None:
+            loader_kwargs_wo = {"weights_only": False}
+            loader_kwargs_wo.update(loader_kwargs)
             return cls.make_torch(
-                loader_args, loader_kwargs, dumper_args, dumper_kwargs
+                loader_args, loader_kwargs_wo, dumper_args, dumper_kwargs
             )
         return cls.make_joblib(loader_args, loader_kwargs, dumper_args, dumper_kwargs)
 
