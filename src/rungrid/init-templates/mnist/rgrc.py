@@ -19,7 +19,7 @@ get_best_model = StateSink(
 podium = ResultPodiumSink(
     direction="maximize",
     top_k=1,
-    on_winner_update=lambda L: get_best_model.put_trial(L[0]),
+    on_winners_update=lambda L: get_best_model.put_trial(L[0]),
 )
 
 
