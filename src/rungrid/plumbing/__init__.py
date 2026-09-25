@@ -694,7 +694,6 @@ class ResultPodiumSink(Sink):
         *,
         direction: Literal["minimize", "maximize"] = "minimize",
         top_k: int = 1,
-        sorting_key: Callable = lambda x: x,
         on_winners_update: Callable[[list[Trial]], Any] = lambda _: None,
     ) -> None:
         """Initialize the ResultPodiumSink.
@@ -703,8 +702,6 @@ class ResultPodiumSink(Sink):
         :type direction: str
         :param top_k: The maximum number of winning trials to keep on the podium.
         :type top_k: int
-        :param sorting_key: A function applied to the podium elements (which are (result, trial) tuples) for sorting.
-        :type sorting_key: collections.abc.Callable
         :param on_winners_update: Callback called with the updated list of winning trials whenever the podium changes.
         :type on_winners_update: collections.abc.Callable[[list[Trial]], typing.Any]
         """
@@ -715,7 +712,6 @@ class ResultPodiumSink(Sink):
         self._reverse = direction == "maximize"
         self._top_k = top_k
         self._podium: list[tuple[Any, Trial]] = []
-        self._key = sorting_key
         self._on_winners_update = on_winners_update
 
     def put_trial(self, trial: Trial) -> None:
@@ -735,7 +731,7 @@ class ResultPodiumSink(Sink):
             return
         old_podium = self._podium.copy()
         self._podium.append((trial.result.result, trial))
-        self._podium.sort(key=self._key, reverse=self._reverse)
+        self._podium.sort(reverse=self._reverse)
         self._podium = self._podium[: min(len(self._podium), self._top_k)]
         if len(old_podium) != len(self._podium) or any(
             x is not y for x, y in zip(old_podium, self._podium)

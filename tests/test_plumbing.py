@@ -274,19 +274,6 @@ def test_result_podium_sink():
     assert sink_max.get_winner() is t2
     assert len(updates_max) == 2  # No update triggered since podium didn't change
 
-    # Test custom sorting key
-    t_neg = StaleTrial(7, uuid4(), v).with_result(TrialResult.make_ok(-30.0, now))
-    sink_custom = ResultPodiumSink(
-        direction="maximize",
-        top_k=1,
-        sorting_key=lambda item: abs(item[0]),
-    )
-    sink_custom.put_trial(t2)
-    assert sink_custom.get_winner() is t2
-
-    sink_custom.put_trial(t_neg)
-    assert sink_custom.get_winner() is t_neg
-
     # Invalid direction raises ValueError
     import pytest
 
