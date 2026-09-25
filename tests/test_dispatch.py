@@ -101,6 +101,7 @@ def test_dispatch_structure_errors():
         experiment_ident="nonexistent-ident",
         experiment_name="NonExistentExperiment",
         fn=lambda trial, **kwargs: 42,
+        arg_names=set(),
     )
 
     with pytest.raises(StructureError, match="experiment not loaded"):
@@ -108,4 +109,3 @@ def test_dispatch_structure_errors():
 
     with pytest.raises(StructureError, match="not found in any registered experiments"):
         _cached_step_execution("NonExistentExperiment.nonexistent_step", (), {})
-

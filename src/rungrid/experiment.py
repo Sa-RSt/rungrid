@@ -1,22 +1,37 @@
 """Experiment, Trial, and Sampler declarations and related framework signals."""
 
+import functools
+import inspect
 import random
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from threading import local as thread_local
 from functools import lru_cache
 from types import MethodType
-from typing import Any, Generic, Iterable, NoReturn, Sequence, Type, TypeVar, final
+from typing import (
+    Any,
+    Generic,
+    Iterable,
+    NoReturn,
+    Sequence,
+    Type,
+    TypeVar,
+    final,
+)
 from uuid import UUID
+from weakref import WeakKeyDictionary
 
 import optuna
 from optuna.distributions import CategoricalChoiceType
 from typing_extensions import Self
 
 from rungrid.error import StructureError
+from rungrid.warn import rungrid_warn
 
 T = TypeVar("T")
+STATE_ARG_RECORD = object()
 
 
 def _check_range(minimum, maximum) -> None:
@@ -511,6 +526,7 @@ class ExperimentStep:
     experiment_ident: str
     experiment_name: str
     fn: Callable
+    arg_names: set[str]
 
     def record(
         self,
@@ -531,6 +547,18 @@ class ExperimentStep:
         """
         return StepRecord(self, next_step_name, kwargs, start, end)
 
+    def trim_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Remove all keys from a dict except those that match
+        one of the arguments accepted by the step. Keys named "self" and "trial"
+        are always removed.
+
+        :param kwargs: The dict to remove the keys from. It will not be modified in place.
+        :type kwargs: dict[str, Any]
+        :return: The new dict with the filtered keys.
+        :rtype: StepRecord
+        """
+        return {k: v for k, v in kwargs.items() if k in self.arg_names}
+
 
 @dataclass
 class _ExperimentStepBuilder:
@@ -539,6 +567,7 @@ class _ExperimentStepBuilder:
     fn: Callable
     recover_from: list[type[BaseException]]
     drop_args: set[str]
+    arg_names: set[str]
 
     def build(self, experiment: "Experiment"):
         bound_fn = MethodType(self.fn, experiment)
@@ -550,6 +579,7 @@ class _ExperimentStepBuilder:
             drop_args=self.drop_args,
             experiment_ident=experiment.identifier,
             experiment_name=experiment.name,
+            arg_names=self.arg_names,
         )
 
 
@@ -640,7 +670,6 @@ def step_method(
     *,
     cache: bool = False,
     recover_from: Iterable[type[BaseException]] = [KeyboardInterrupt],
-    drop_args: Iterable[str] = [],
 ):
     """Decorate a method of an Experiment subclass as an experiment step.
 
@@ -655,11 +684,50 @@ def step_method(
     """
 
     def decorator(fn: Callable):
+        sig = inspect.signature(fn)
+        drop_args = set()
+        arg_names = set()
+        for k, v in sig.parameters.items():
+            if v.default != v.empty:
+                rungrid_warn(
+                    f"step_method: {v.__qualname__}: state argument {k} has a default value - "
+                    + "this makes its initialization prone to typing errors. Please consider "
+                    + "initializing your arguments manually",
+                    UserWarning,
+                )
+            anno = v.annotation
+            will_drop = True
+            if hasattr(anno, "__metadata__"):
+                md: tuple[Any] = anno.__metadata__
+                for obj in md:
+                    if obj is STATE_ARG_RECORD:
+                        will_drop = False
+            if will_drop:
+                drop_args.add(k)
+            arg_names.add(k)
+        for name in ["self", "trial"]:
+            if name not in arg_names:
+                raise StructureError(
+                    f'step_methods are required to have an argument called "{name}"'
+                )
+        arg_names.discard("self")
+        arg_names.discard("trial")
         fqn = _get_fqn(fn)
         _fqn_to_step_builder[fqn] = _ExperimentStepBuilder(
-            fqn, cache, fn, list(recover_from), set(drop_args)
+            name=fqn,
+            cacheable=cache,
+            fn=fn,
+            recover_from=list(recover_from),
+            drop_args=drop_args,
+            arg_names=arg_names,
         )
-        return fn
+
+        @functools.wraps(fn)
+        def _guarded(self: Experiment, *args, **kwargs):
+            self._disallow_step_call()
+            return fn(self, *args, **kwargs)
+
+        return _guarded
 
     return decorator
 
@@ -731,6 +799,9 @@ class ExperimentRegistry:
         """Initialize the ExperimentRegistry."""
         self._experiments_by_name: dict[str, Experiment] = {}
         self._experiments_by_ident: dict[str, Experiment] = {}
+        self._thread_locals: WeakKeyDictionary[Experiment, thread_local] = (
+            WeakKeyDictionary()
+        )
 
     @classmethod
     @lru_cache
@@ -777,6 +848,21 @@ class ExperimentRegistry:
         :rtype: Experiment | None
         """
         return self._experiments_by_ident.get(ident, None)
+
+    def get_thread_locals(self, exp: "Experiment") -> thread_local:
+        """Get auxiliary thread local variables associated with an experiment.
+
+        :param exp: The Experiment object
+        :type exp: Experiment
+        :return: A threading.local instance
+        :rtype: threading.local
+        """
+        try:
+            return self._thread_locals[exp]
+        except KeyError:
+            tp = thread_local()
+            self._thread_locals[exp] = tp
+            return tp
 
 
 class Experiment(ABC, Generic[T]):
@@ -873,13 +959,42 @@ class Experiment(ABC, Generic[T]):
     @final
     def _step_from_fn(self, fn: Callable) -> ExperimentStep:
         for _, step in self._steps.items():
-            if step.fn is fn or step.fn == fn:
+            if step.fn is fn or step.fn.__qualname__ == fn.__qualname__:
                 return step
         raise LookupError(
             f"{fn!r} was not recognized as an experiment step. "
             + "Make sure it is a method of the same experiment and its name is "
             + 'prefixed with "step_".'
         )
+
+    @final
+    def _disallow_step_call(self) -> None | NoReturn:
+        exc = RuntimeError(
+            "direct call to step method detected; use self.exit_next_step instead."
+        )
+        reg = ExperimentRegistry.get_instance()
+        tp = reg.get_thread_locals(self)
+
+        try:
+            allow: bool = tp.allow_step_call
+        except AttributeError:
+            tp.allow_step_call = False
+            raise exc
+        if not allow:
+            raise exc
+        tp.allow_step_call = False
+
+    @final
+    def allow_step_call(self) -> None:
+        """Allow the next call to a step_method on this class
+        by the current thread to succeed.
+
+        This is here to prevent accidental calls without `self.exit_next_step`
+        and should only be used by schedulers.
+        """
+        reg = ExperimentRegistry.get_instance()
+        tp = reg.get_thread_locals(self)
+        tp.allow_step_call = True
 
     @final
     def _get_first_step(self) -> ExperimentStep:
@@ -906,15 +1021,37 @@ class Experiment(ABC, Generic[T]):
         raise SignalDone(result)
 
     @final
-    def exit_next_step(self, next_step: Callable, **kwargs) -> NoReturn:
+    def exit_next_step(
+        self,
+        next_step: Callable,
+        *,
+        fill_locals: bool = False,
+        **kwargs,
+    ) -> NoReturn:
         """Raise a SignalNextStep exception to transition the trial to the next step.
 
         :param next_step: The callable of the next step to execute.
         :type next_step: collections.abc.Callable
-        :param kwargs: The keyword arguments to pass to the next step.
+        :param fill_locals: If True, add the local variables from the caller's scope
+        into the kwargs. This avoids the issue that, if `exit_next_step` is called with
+        `**locals()` as keyword arguments, it will cause errors because the names "trial"
+        and "self" are most likely going to be present.
+        :type fill_locals: bool
+        :param kwargs: The keyword arguments to pass to the next step. Overrides locals
+        given by `fill_locals`.
         :raises SignalNextStep: Always, to signal a transition.
         """
-        raise SignalNextStep(self._step_from_fn(next_step), kwargs)
+        actual_kwargs = {}
+        if fill_locals:
+            caller = inspect.stack()[1]
+            loc = caller.frame.f_locals
+            actual_kwargs.update(loc)
+            for delname in ["self", "trial"]:
+                del actual_kwargs[delname]
+        actual_kwargs.update(kwargs)
+        step = self._step_from_fn(next_step)
+
+        raise SignalNextStep(step, step.trim_kwargs(actual_kwargs))
 
     @final
     def exit_prune(self, reason: str) -> NoReturn:
@@ -1030,7 +1167,7 @@ class Trial(ABC):
         self._tags |= set(tags)
 
     @property
-    def step_records(self) -> Iterable[StepRecord]:
+    def step_records(self) -> Sequence[StepRecord]:
         """Get the step records of executed steps in this trial.
 
         :return: An iterable of StepRecord objects.

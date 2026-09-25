@@ -175,11 +175,12 @@ def _cached_step_execution(
 ) -> tuple[str, Any]:
     reg = ExperimentRegistry.get_instance()
     step_obj = None
+    exp = None
     for exp in reg._experiments_by_name.values():
         if step_name in exp.steps:
             step_obj = exp.steps[step_name]
             break
-    if step_obj is None:
+    if step_obj is None or exp is None:
         raise StructureError(
             f"Step {step_name} not found in any registered experiments."
         )
@@ -191,12 +192,13 @@ def _cached_step_execution(
     trial = StaleTrial(0, uuid4(), v)
 
     try:
+        exp.allow_step_call()
         res = step_obj.fn(trial, **step_kwargs)
         return ("done", res)
     except SignalDone as e:
         return ("done", e.result)
     except SignalNextStep as e:
-        return ("next_step", (e.next_step.name, e.kwargs))
+        return ("next_step", (e.next_step.name, e.next_step.trim_kwargs(e.kwargs)))
     except SignalPrune as e:
         return ("prune", e.reason)
     except Exception as e:
@@ -252,6 +254,7 @@ def run_step(
     try:
         if step.cacheable and cache_provider is not None:
             _run_cacheable_step_fn(cache_provider, step, trial, kwargs)
+        experiment.allow_step_call()
         res = step.fn(trial, **kwargs)
         raise SignalDone(res)
     except SignalDone as e:
@@ -262,7 +265,7 @@ def run_step(
     except SignalNextStep as e:
         end = datetime.datetime.now()
         trial.record_step(step, start, end, e.next_step.name, **e.kwargs)
-        return trial, e.next_step, e.kwargs
+        return trial, e.next_step, e.next_step.trim_kwargs(e.kwargs)
     except SignalPrune as e:
         end = datetime.datetime.now()
         tr = TrialResult.make_pruned(e.reason, end)

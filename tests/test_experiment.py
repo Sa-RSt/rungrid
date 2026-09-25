@@ -127,3 +127,39 @@ def test_experiment_step_from_fn_unregistered_raises_lookup_error():
         exp._step_from_fn(lambda: None)
 
 
+def test_unallowed_step_method_call_raises_runtime_error():
+    class WaywardCallExperiment(Experiment):
+        def version(self) -> str:
+            return "wayward-call"
+
+        def variables(self, v, s) -> None:
+            pass
+
+        def first_step(self):
+            return self.my_step
+
+        @step_method()
+        def my_step(self, trial, **kwargs):
+            self.other_step(trial)
+            assert isinstance(self, Experiment)
+            assert isinstance(trial, Trial)
+            return 43
+
+        @step_method()
+        def other_step(self, trial, **kwargs):
+            assert isinstance(self, Experiment)
+            assert isinstance(trial, Trial)
+            return 44
+
+    exp = WaywardCallExperiment()
+    t = StaleTrial(1, uuid4(), VarNamespace(set()))
+    m = "direct call"
+    with pytest.raises(RuntimeError, match=m):
+        exp.my_step(t)
+    with pytest.raises(RuntimeError, match=m):
+        exp.other_step(t)
+    exp.allow_step_call()
+    with pytest.raises(RuntimeError, match=m):
+        exp.my_step(t)
+    exp.allow_step_call()
+    assert exp.other_step(t) == 44
