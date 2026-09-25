@@ -11,47 +11,9 @@ from rungrid.plumbing import (
     LoaderDumper,
     MultiSource,
     RandomMultiSink,
-    Sink,
     Source,
 )
-
-
-class SimpleSink(Sink):
-    """A basic in-memory sink for testing."""
-
-    def __init__(self):
-        self.trials = []
-
-    def put_trial(self, trial):
-        self.trials.append(trial)
-
-
-class SimpleSource(Source):
-    """A basic in-memory source for testing."""
-
-    def __init__(self, trials):
-        self._trials = list(trials)
-
-    def get_trials(self, *, finished=None, search_tag=None):
-        for t in self._trials:
-            if finished is not None and t.is_finished() != finished:
-                continue
-            if search_tag is not None and search_tag not in t.tags:
-                continue
-            yield t
-
-    def consume_and_tag(
-        self, applied_tag, *, finished=None, search_tag=None, predicate=lambda _: True
-    ):
-        for t in self._trials:
-            if finished is not None and t.is_finished() != finished:
-                continue
-            if search_tag is not None and search_tag not in t.tags:
-                continue
-            if applied_tag not in t.tags and predicate(t):
-                t.add_tag(applied_tag)
-                return t
-        return None
+from rungrid.plumbing.storage import InMemoryStorage
 
 
 def test_loader_dumpers():
@@ -99,8 +61,8 @@ def test_multi_source():
     trial1 = StaleTrial(1, uuid4(), v)
     trial2 = StaleTrial(2, uuid4(), v)
 
-    source1 = SimpleSource([trial1])
-    source2 = SimpleSource([trial2])
+    source1 = InMemoryStorage([trial1])
+    source2 = InMemoryStorage([trial2])
 
     # Using deterministic seed for RNG
     rng = random.Random(42)
@@ -117,8 +79,8 @@ def test_copying_multi_sink():
     v = VarNamespace(set())
     trial = StaleTrial(1, uuid4(), v)
 
-    sink1 = SimpleSink()
-    sink2 = SimpleSink()
+    sink1 = InMemoryStorage()
+    sink2 = InMemoryStorage()
     multi = CopyingMultiSink([sink1, sink2])
 
     multi.put_trial(trial)
@@ -134,11 +96,11 @@ def test_random_multi_sink_deterministic_fallback():
     trial = StaleTrial(1, uuid4(), v, tags={"test-tag"})
 
     # sink1 rejects all trials containing 'test-tag'
-    sub_sink1 = SimpleSink()
+    sub_sink1 = InMemoryStorage()
     sink1 = FilterSink(sub_sink1, lambda t: "test-tag" not in t.tags)
 
     # sink2 accepts all trials
-    sub_sink2 = SimpleSink()
+    sub_sink2 = InMemoryStorage()
     sink2 = sub_sink2
 
     # Regardless of RNG choices or initial selections, since sink1 rejects, the trial MUST end up in sink2.
@@ -165,7 +127,7 @@ def test_filters():
     trial1 = StaleTrial(1, uuid4(), v, tags={"target"})
     trial2 = StaleTrial(2, uuid4(), v, tags={"other"})
 
-    source = SimpleSource([trial1, trial2])
+    source = InMemoryStorage([trial1, trial2])
 
     # FilterSource
     f_source = FilterSource(source, lambda t: "target" in t.tags)
@@ -174,7 +136,7 @@ def test_filters():
     assert trials[0] is trial1
 
     # FilterSink
-    sink = SimpleSink()
+    sink = InMemoryStorage()
     f_sink = FilterSink(sink, lambda t: "target" in t.tags)
 
     f_sink.put_trial(trial1)
@@ -199,7 +161,7 @@ def test_multi_source_infinite_interleave():
             pass
 
     finite_trial = StaleTrial(100, uuid4(), VarNamespace(set()))
-    finite_source = SimpleSource([finite_trial])
+    finite_source = InMemoryStorage([finite_trial])
     infinite_source = InfiniteSource()
 
     # Create MultiSource and get trials (deterministically seeded)

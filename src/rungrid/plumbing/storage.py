@@ -9,6 +9,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import IO, Literal, Protocol, Sequence
 
 from optuna.storages.journal import JournalFileOpenLock
@@ -118,7 +119,7 @@ class BucketFileStorage(Sink, Source):
         concat = ".".join(sorted(trial.tags)) or "untagged"
         mangle = self._tag_mangle(concat)
         dir_name = base_dir / mangle
-        return (dir_name / str(trial.uuid)[:1]).with_suffix(".bin")
+        return (dir_name / str(trial.uuid)[:4]).with_suffix(".bin")
 
     def _bucket_lock(self, bucket: Path):
         bucket.parent.mkdir(parents=True, exist_ok=True)
@@ -331,3 +332,49 @@ class CSVSink(Sink):
         :type trial: Trial
         """
         self.put_trials([trial])
+
+
+class InMemoryStorage(Source, Sink):
+    def __init__(self, trials: list[Trial] | None = None) -> None:
+        super().__init__()
+        if trials is None:
+            trials = []
+        self.trials = trials
+        self._lock = Lock()
+
+    def get_trials(
+        self, *, finished: bool | None = None, search_tag: str | None = None
+    ) -> Iterable[Trial]:
+        for trial in list(self.trials):
+            if finished is not None and finished != trial.is_finished():
+                continue
+            if search_tag is not None and search_tag not in trial.tags:
+                continue
+            yield trial
+
+    def consume_and_tag(
+        self,
+        applied_tag: str,
+        *,
+        finished: bool | None = None,
+        search_tag: str | None = None,
+        predicate: PredicateType = lambda _: True,
+    ) -> Trial | None:
+        with self._lock:
+            for trial in self.trials:
+                if finished is not None and finished != trial.is_finished():
+                    continue
+                if search_tag is not None and search_tag not in trial.tags:
+                    continue
+                if applied_tag in trial.tags:
+                    continue
+                if not predicate(trial):
+                    continue
+                trial.add_tag(applied_tag)
+                return trial
+
+    def put_trial(self, trial: Trial) -> None:
+        self.trials.append(trial)
+
+    def put_trials(self, trials: Sequence[Trial]) -> None:
+        self.trials.extend(trials)

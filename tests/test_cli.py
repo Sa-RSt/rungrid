@@ -20,25 +20,8 @@ def test_cli_run_subcommand(run_in_tmp_dir):
 from uuid import uuid4
 from rungrid.experiment import Experiment, VarNamespace, step_method, StaleTrial, TrialResult
 from rungrid.plumbing import Empty, Source, Sink
+from rungrid.plumbing.storage import InMemoryStorage
 import datetime
-
-
-class SimpleSource(Source):
-    def __init__(self, trials):
-        self.trials = list(trials)
-    def get_trials(self, *, search_tag=None, **kwargs):
-        if search_tag:
-            return [t for t in self.trials if search_tag in t.tags]
-        return self.trials
-    def consume_and_tag(self, applied_tag, **kwargs):
-        pass
-
-
-class SimpleSink(Sink):
-    def __init__(self):
-        self.trials = []
-    def put_trial(self, trial):
-        self.trials.append(trial)
 
 
 class CliDummyExperiment(Experiment):
@@ -57,13 +40,13 @@ class CliDummyExperiment(Experiment):
 
 
 v = VarNamespace(set())
-my_source = SimpleSource([
+my_source = InMemoryStorage([
     StaleTrial(1, uuid4(), v).with_result(TrialResult.make_ok(1, datetime.datetime.now())),
     StaleTrial(2, uuid4(), v),
     StaleTrial(3, uuid4(), v).with_result(TrialResult.make_error(Exception(), datetime.datetime.now())),
     StaleTrial(4, uuid4(), v),
 ])
-my_sink = SimpleSink()
+my_sink = InMemoryStorage()
 """
     with open("rgrc.py", "w") as f:
         f.write(rgrc_content)
@@ -89,31 +72,16 @@ def test_cli_pump_subcommand(run_in_tmp_dir):
 from uuid import uuid4
 from rungrid.experiment import VarNamespace, StaleTrial, TrialResult
 from rungrid.plumbing import Source, Sink
+from rungrid.plumbing.storage import InMemoryStorage
 import datetime
-
-class SimpleSource(Source):
-    def __init__(self, trials):
-        self.trials = list(trials)
-    def get_trials(self, *, search_tag=None, **kwargs):
-        if search_tag:
-            return [t for t in self.trials if search_tag in t.tags]
-        return self.trials
-    def consume_and_tag(self, applied_tag, **kwargs):
-        pass
-
-class SimpleSink(Sink):
-    def __init__(self):
-        self.trials = []
-    def put_trial(self, trial):
-        self.trials.append(trial)
 
 v = VarNamespace(set())
 trial_ok_result = StaleTrial(1, uuid4(), v, tags={"pass"}).with_result(TrialResult.make_ok(1, datetime.datetime.now()))
 trial_ok_noresult = StaleTrial(2, uuid4(), v, tags={"pass"})
 trial_fail = StaleTrial(3, uuid4(), v, tags={"fail"})
 
-src = SimpleSource([trial_ok_result, trial_ok_noresult, trial_fail])
-snk = SimpleSink()
+src = InMemoryStorage([trial_ok_result, trial_ok_noresult, trial_fail])
+snk = InMemoryStorage()
 """
     with open("rgrc.py", "w") as f:
         f.write(rgrc_content)
@@ -135,21 +103,15 @@ def test_cli_csv_sink(run_in_tmp_dir):
 from uuid import uuid4
 from rungrid.experiment import VarNamespace, StaleTrial, TrialResult
 from rungrid.plumbing import Source
+from rungrid.plumbing.storage import InMemoryStorage
 import datetime
 
-class SimpleSource(Source):
-    def __init__(self, trials):
-        self.trials = list(trials)
-    def get_trials(self, **kwargs):
-        return self.trials
-    def consume_and_tag(self, applied_tag, **kwargs):
-        pass
 
 v = VarNamespace(set())
 t1 = StaleTrial(1, uuid4(), v)
 t1_with_res = t1.with_result(TrialResult.make_ok(0.999, datetime.datetime.now()))
 
-src = SimpleSource([t1_with_res])
+src = InMemoryStorage([t1_with_res])
 """
     with open("rgrc.py", "w") as f:
         f.write(rgrc_content)
@@ -169,14 +131,10 @@ def test_cli_run_with_optuna_limit(run_in_tmp_dir):
 import optuna
 from rungrid.experiment import Experiment, VarNamespace, step_method
 from rungrid.plumbing import Sink
+from rungrid.plumbing.storage import InMemoryStorage
 
-class SimpleSink(Sink):
-    def __init__(self):
-        self.trials = []
-    def put_trial(self, trial):
-        self.trials.append(trial)
 
-my_sink = SimpleSink()
+my_sink = InMemoryStorage()
 
 def my_study_factory(exp_id):
     return optuna.create_study(study_name=exp_id, direction="minimize")
@@ -361,28 +319,17 @@ def test_cli_pump_with_predicate(run_in_tmp_dir):
 from uuid import uuid4
 from rungrid.experiment import VarNamespace, StaleTrial, TrialResult
 from rungrid.plumbing import Source, Sink
+from rungrid.plumbing.storage import InMemoryStorage
 
-class SimpleSource(Source):
-    def __init__(self, trials):
-        self.trials = list(trials)
-    def get_trials(self, **kwargs):
-        return self.trials
-    def consume_and_tag(self, applied_tag, **kwargs):
-        pass
 
-class SimpleSink(Sink):
-    def __init__(self):
-        self.trials = []
-    def put_trial(self, trial):
-        self.trials.append(trial)
 
 v = VarNamespace(set())
 trial_1 = StaleTrial(1, uuid4(), v)
 trial_2 = StaleTrial(2, uuid4(), v)
 
-src = SimpleSource([trial_1, trial_2])
-snk1 = SimpleSink()
-snk2 = SimpleSink()
+src = InMemoryStorage([trial_1, trial_2])
+snk1 = InMemoryStorage()
+snk2 = InMemoryStorage()
 """
     with open("rgrc.py", "w") as f:
         f.write(rgrc_content)
