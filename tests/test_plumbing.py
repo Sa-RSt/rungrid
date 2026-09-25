@@ -12,6 +12,8 @@ from rungrid.plumbing import (
     MultiSource,
     RandomMultiSink,
     Source,
+    StateSink,
+    ResultPodiumSink,
 )
 from rungrid.plumbing.storage import InMemoryStorage
 
@@ -184,3 +186,190 @@ def test_loader_dumper_invalid_backend_raises_key_error():
 
     with pytest.raises(KeyError):
         LoaderDumper.make("invalid_backend_name", (), {}, (), {})
+
+
+def test_result_podium_sink():
+    """Verify ResultPodiumSink tracks top-k best trials and triggers callback correctly."""
+    from datetime import datetime
+    from rungrid.experiment import TrialResult, StaleTrial, VarNamespace
+
+    v = VarNamespace(set())
+    now = datetime.now()
+
+    # Create a few trials
+    t1 = StaleTrial(1, uuid4(), v).with_result(TrialResult.make_ok(10.0, now))
+    t2 = StaleTrial(2, uuid4(), v).with_result(TrialResult.make_ok(20.0, now))
+    t3 = StaleTrial(3, uuid4(), v).with_result(TrialResult.make_ok(5.0, now))
+    # Error trial (should be ignored)
+    t_err = StaleTrial(4, uuid4(), v).with_result(TrialResult.make_error("oops", now))
+    # Pruned trial (should be ignored)
+    t_pruned = StaleTrial(5, uuid4(), v).with_result(
+        TrialResult.make_pruned("pruned", now)
+    )
+    # Trial without result (should be ignored)
+    t_no_res = StaleTrial(6, uuid4(), v)
+
+    # Test minimize (default)
+    updates_min = []
+    sink_min = ResultPodiumSink(
+        direction="minimize",
+        top_k=2,
+        on_winners_update=lambda winners: updates_min.append(list(winners)),
+    )
+
+    # Put a trial without result
+    sink_min.put_trial(t_no_res)
+    assert len(sink_min.get_winners()) == 0
+    assert len(updates_min) == 0
+
+    # Put error and pruned trials
+    sink_min.put_trial(t_err)
+    sink_min.put_trial(t_pruned)
+    assert len(sink_min.get_winners()) == 0
+    assert len(updates_min) == 0
+
+    # Put t1 (result = 10.0) -> podium updated to [t1]
+    sink_min.put_trial(t1)
+    assert sink_min.get_winner() is t1
+    assert sink_min.get_winners() == [t1]
+    assert len(updates_min) == 1
+    assert updates_min[-1] == [t1]
+
+    # Put t2 (result = 20.0) -> t2 is worse, but since top_k=2, it enters podium: [t1, t2]
+    sink_min.put_trial(t2)
+    assert sink_min.get_winner() is t1
+    assert sink_min.get_winners() == [t1, t2]
+    assert len(updates_min) == 2
+    assert updates_min[-1] == [t1, t2]
+
+    # Put t3 (result = 5.0) -> t3 is best: [t3, t1] (t2 is pushed out)
+    sink_min.put_trial(t3)
+    assert sink_min.get_winner() is t3
+    assert sink_min.get_winners() == [t3, t1]
+    assert len(updates_min) == 3
+    assert updates_min[-1] == [t3, t1]
+
+    # Put t1 again -> same result, no podium change, callback should not run
+    sink_min.put_trial(t1)
+    assert len(updates_min) == 3
+
+    # Test maximize
+    updates_max = []
+    sink_max = ResultPodiumSink(
+        direction="maximize",
+        top_k=2,
+        on_winners_update=lambda winners: updates_max.append(list(winners)),
+    )
+
+    sink_max.put_trial(t1)  # [t1]
+    assert sink_max.get_winner() is t1
+    assert updates_max[-1] == [t1]
+
+    sink_max.put_trial(t2)  # [t2, t1]
+    assert sink_max.get_winner() is t2
+    assert sink_max.get_winners() == [t2, t1]
+    assert updates_max[-1] == [t2, t1]
+
+    sink_max.put_trial(t3)  # t3 is worse than t1 and t2, podium remains [t2, t1]
+    assert sink_max.get_winner() is t2
+    assert len(updates_max) == 2  # No update triggered since podium didn't change
+
+    # Test custom sorting key
+    t_neg = StaleTrial(7, uuid4(), v).with_result(TrialResult.make_ok(-30.0, now))
+    sink_custom = ResultPodiumSink(
+        direction="maximize",
+        top_k=1,
+        sorting_key=lambda item: abs(item[0]),
+    )
+    sink_custom.put_trial(t2)
+    assert sink_custom.get_winner() is t2
+
+    sink_custom.put_trial(t_neg)
+    assert sink_custom.get_winner() is t_neg
+
+    # Invalid direction raises ValueError
+    import pytest
+
+    with pytest.raises(ValueError):
+        ResultPodiumSink(direction="invalid_direction")
+
+    # Repr verification
+    assert "ResultPodiumSink" in repr(sink_min)
+    assert "minimize" in repr(sink_min)
+    assert "maximize" in repr(sink_max)
+
+
+def test_state_sink():
+    """Verify StateSink processes step records and extracts arguments correctly."""
+    from datetime import datetime
+    from rungrid.experiment import StepRecord, StaleTrial, VarNamespace
+
+    v = VarNamespace(set())
+    now = datetime.now()
+
+    rec1 = StepRecord(
+        step=None,  # type: ignore
+        next_step_name="aaa.bb.step_score",
+        next_step_kwargs={"model": "model_v1", "other": 123},
+        start=now,
+        end=now,
+    )
+    rec2 = StepRecord(
+        step=None,  # type: ignore
+        next_step_name="aaa.bb.step_score",
+        next_step_kwargs={"model": "model_v2"},
+        start=now,
+        end=now,
+    )
+    # Irrelevant record (wrong step name)
+    rec_irrelevant_step = StepRecord(
+        step=None,  # type: ignore
+        next_step_name="ccc.dd.other_step",
+        next_step_kwargs={"model": "model_v3"},
+        start=now,
+        end=now,
+    )
+    # Irrelevant record (missing arg)
+    rec_missing_arg = StepRecord(
+        step=None,  # type: ignore
+        next_step_name="aaa.bb.step_score",
+        next_step_kwargs={"different_arg": "some_val"},
+        start=now,
+        end=now,
+    )
+
+    # Trial with all records
+    trial = StaleTrial(
+        1, uuid4(), v, step_records=[rec1, rec_irrelevant_step, rec_missing_arg, rec2]
+    )
+
+    # Test last_only=True
+    received_last = []
+    sink_last = StateSink(
+        step_name="step_score",
+        arg_name="model",
+        dest=lambda t, val: received_last.append((t, val)),
+        last_only=True,
+    )
+    sink_last.put_trial(trial)
+    assert len(received_last) == 1
+    assert received_last[0][0] is trial
+    assert received_last[0][1] == "model_v2"
+
+    # Test last_only=False
+    received_all = []
+    sink_all = StateSink(
+        step_name="step_score",
+        arg_name="model",
+        dest=lambda t, val: received_all.append((t, val)),
+        last_only=False,
+    )
+    sink_all.put_trial(trial)
+    assert len(received_all) == 1
+    assert received_all[0][0] is trial
+    assert received_all[0][1] == ["model_v1", "model_v2"]
+
+    # Test representation
+    assert "StateSink" in repr(sink_last)
+    assert "step_name=step_score" in repr(sink_last)
+    assert "arg_name=model" in repr(sink_last)

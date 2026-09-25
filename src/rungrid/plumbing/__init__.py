@@ -679,3 +679,160 @@ class FilterSink(Sink, HasPredicate):
     def __repr__(self) -> str:
         return f"FilterSink({self._decorated}, {self._predicate})"
 
+
+class ResultPodiumSink(Sink):
+    """A trial sink that keeps track of the top-k best trials based on their results.
+
+    Maintains a "podium" (leaderboard) of trials, sorted by their result value.
+    Supports minimizing or maximizing the objective result. When the podium
+    changes (i.e., a new trial enters the podium or the order of trials on the
+    podium changes), an optional callback is triggered.
+    """
+
+    def __init__(
+        self,
+        *,
+        direction: Literal["minimize", "maximize"] = "minimize",
+        top_k: int = 1,
+        sorting_key: Callable = lambda x: x,
+        on_winners_update: Callable[[list[Trial]], Any] = lambda _: None,
+    ) -> None:
+        """Initialize the ResultPodiumSink.
+
+        :param direction: Whether to minimize or maximize the trial result. Must be "minimize" or "maximize".
+        :type direction: str
+        :param top_k: The maximum number of winning trials to keep on the podium.
+        :type top_k: int
+        :param sorting_key: A function applied to the podium elements (which are (result, trial) tuples) for sorting.
+        :type sorting_key: collections.abc.Callable
+        :param on_winners_update: Callback called with the updated list of winning trials whenever the podium changes.
+        :type on_winners_update: collections.abc.Callable[[list[Trial]], typing.Any]
+        """
+        super().__init__()
+        choices = ["maximize", "minimize"]
+        if direction not in choices:
+            raise ValueError(f"{direction} not in {choices}")
+        self._reverse = direction == "maximize"
+        self._top_k = top_k
+        self._podium: list[tuple[Any, Trial]] = []
+        self._key = sorting_key
+        self._on_winners_update = on_winners_update
+
+    def put_trial(self, trial: Trial) -> None:
+        """Store a trial and update the podium if its result is eligible.
+
+        Ignores trials without a result, and trials that failed with an error
+        or were pruned. If the trial's result qualifies it for the top-k
+        podium, the podium is updated, sorted, and the `on_winners_update`
+        callback is triggered if the podium content or order changed.
+
+        :param trial: The trial instance to store and potentially place on the podium.
+        :type trial: Trial
+        """
+        if trial.result is None:
+            return
+        if trial.result.is_error or trial.result.is_pruned:
+            return
+        old_podium = self._podium.copy()
+        self._podium.append((trial.result.result, trial))
+        self._podium.sort(key=self._key, reverse=self._reverse)
+        self._podium = self._podium[: min(len(self._podium), self._top_k)]
+        if len(old_podium) != len(self._podium) or any(
+            x is not y for x, y in zip(old_podium, self._podium)
+        ):
+            print(self.get_winners())
+            self._on_winners_update(self.get_winners())
+
+    def get_winner(self) -> Trial | None:
+        """Retrieve the single best trial currently on the podium.
+
+        :return: The overall best trial, or None if the podium is empty.
+        :rtype: Trial | None
+        """
+        if self._podium:
+            return self._podium[0][1]
+
+    def get_winners(self) -> list[Trial]:
+        """Retrieve all trials currently on the podium, ordered from best to worst.
+
+        :return: A list of the winning Trial instances currently on the podium.
+        :rtype: list[Trial]
+        """
+        return [x[1] for x in self._podium]
+
+    def __repr__(self) -> str:
+        direction = {True: "maximize", False: "minimize"}[self._reverse]
+        return f"ResultPodiumSink(direction={direction}, top_k={self._top_k})"
+
+
+class StateSink(Sink):
+    """A trial sink that extracts specific arguments from the trial's step records and passes them to a callback.
+
+    Useful for tracking, checkpointing, or saving specific states (such as model
+    parameters or configuration dicts) that were scheduled or passed as keyword
+    arguments to future experiment steps.
+    """
+
+    def __init__(
+        self,
+        step_name: str,
+        arg_name: str,
+        dest: Callable[[Trial, Any | list[Any]], Any],
+        last_only: bool = True,
+    ) -> None:
+        """Initialize the StateSink.
+
+        :param step_name: The name (or suffix) of the next step to look for in step records.
+        :type step_name: str
+        :param arg_name: The name of the argument inside the step's next_step_kwargs to extract.
+        :type arg_name: str
+        :param dest: Callback function to receive the extracted argument value(s). Signature: `dest(trial, value)`.
+        :type dest: collections.abc.Callable[[Trial, typing.Any], typing.Any]
+        :param last_only: If True, only extracts from the last relevant step record. If False, extracts all matching ones as a list.
+        :type last_only: bool
+        """
+        super().__init__()
+        self._step_name = step_name
+        self._arg_name = arg_name
+        self._dest = dest
+        self._last_only = last_only
+
+    def _record_is_relevant(self, rec: StepRecord) -> bool:
+        return (
+            rec.next_step_kwargs is not None
+            and self._arg_name in rec.next_step_kwargs.keys()
+            and rec.next_step_name is not None
+            and rec.next_step_name.split(".")[-1] == self._step_name
+        )
+
+    def put_trial(self, trial: Trial) -> None:
+        """Process the trial's step records and send relevant argument values to the destination callback.
+
+        Searches for step records whose next step name matches `step_name` and contains `arg_name`
+        in its keyword arguments. If `last_only` is True, only the last matching record's argument
+        value is passed. Otherwise, all matching argument values are passed as a list.
+
+        :param trial: The trial instance to process.
+        :type trial: Trial
+        """
+        recs = trial.step_records
+        if self._last_only:
+            for i in range(len(recs) - 1, -1, -1):
+                rec = recs[i]
+                if self._record_is_relevant(rec):
+                    return self._dest(
+                        trial,
+                        rec.next_step_kwargs[self._arg_name],  # type: ignore
+                    )
+        else:
+            self._dest(
+                trial,
+                [
+                    rec.next_step_kwargs[self._arg_name]  # type: ignore
+                    for rec in recs
+                    if self._record_is_relevant(rec)
+                ],
+            )
+
+    def __repr__(self) -> str:
+        return f"StateSink(step_name={self._step_name}, arg_name={self._arg_name}, last_only={self._last_only})"
