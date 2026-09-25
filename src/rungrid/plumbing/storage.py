@@ -267,6 +267,9 @@ class BucketFileStorage(Sink, Source):
                 self.put_trial(sampled)
         return sampled
 
+    def __repr__(self) -> str:
+        return f"BucketFileStorage(finished_dir={str(self._finished_dir)!r}, unfinished_dir={str(self._unfinished_dir)!r})"
+
 
 class CSVSink(Sink):
     """A trial Sink that writes trial summaries to a CSV file or stream."""
@@ -378,3 +381,6 @@ class InMemoryStorage(Source, Sink):
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
         self.trials.extend(trials)
+
+    def __repr__(self) -> str:
+        return f"InMemoryStorage(len={len(self.trials)})"

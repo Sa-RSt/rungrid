@@ -6,13 +6,14 @@ import random
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Iterator
 from io import BytesIO
-from typing import IO, Any, Sequence
+from typing import IO, Any, Literal, Sequence, TypeVar
 
 import joblib
 
-from rungrid.experiment import StaleTrial, Trial
+from rungrid.experiment import StaleTrial, StepRecord, Trial
 
 PredicateType = Callable[[Trial], bool]
+T = TypeVar("T")
 
 
 class LoaderDumper:
@@ -371,6 +372,9 @@ class Empty(Sink, Source):
         """
         return None
 
+    def __repr__(self) -> str:
+        return "Empty()"
+
 
 class MultiSource(Source):
     """A combined trial source delegating to multiple component sources."""
@@ -469,6 +473,9 @@ class MultiSource(Source):
                 return trial
         return None
 
+    def __repr__(self) -> str:
+        return f"MultiSource({repr(self._sources)})"
+
 
 class CopyingMultiSink(Sink):
     """A trial sink that copies every received trial to all component sinks."""
@@ -499,6 +506,9 @@ class CopyingMultiSink(Sink):
         """
         for comp in self._sinks:
             comp.put_trials(trials)
+
+    def __repr__(self) -> str:
+        return f"CopyingMultiSink({repr(self._sinks)})"
 
 
 class RandomMultiSink(Sink):
@@ -535,6 +545,9 @@ class RandomMultiSink(Sink):
                     return None
                 comp = self._rng.choice(pool)
             return comp.put_trial(trial)
+
+    def __repr__(self) -> str:
+        return f"RandomMultiSink({repr(self._sinks)})"
 
 
 class HasPredicate(ABC):
@@ -619,6 +632,9 @@ class FilterSource(Source, HasPredicate):
             predicate=lambda trial: self._predicate(trial) and predicate(trial),
         )
 
+    def __repr__(self) -> str:
+        return f"FilterSource({self._decorated}, {self._predicate})"
+
 
 class FilterSink(Sink, HasPredicate):
     """A trial sink that filters trials using a predicate before storing them in an underlying sink."""
@@ -659,3 +675,7 @@ class FilterSink(Sink, HasPredicate):
         :type trials: collections.abc.Sequence[Trial]
         """
         return self._decorated.put_trials([x for x in trials if self._predicate(x)])
+
+    def __repr__(self) -> str:
+        return f"FilterSink({self._decorated}, {self._predicate})"
+
