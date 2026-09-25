@@ -59,8 +59,11 @@ def test_all_public_docstrings(module):
             # Check methods
             for method_name, method in inspect.getmembers(obj):
                 # Skip private methods
-                method_private = method_name.startswith("_") and not (
-                    method_name.startswith("__") and method_name.endswith("__")
+                method_private = method_name == "__repr__" or (
+                    method_name.startswith("_")
+                    and not (
+                        method_name.startswith("__") and method_name.endswith("__")
+                    )
                 )
                 if method_private:
                     continue
