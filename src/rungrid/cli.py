@@ -1,5 +1,6 @@
 """Command-line interface and parsing utilities for running rungrid experiments."""
 
+import traceback
 import argparse
 import shutil
 import sys
@@ -156,6 +157,16 @@ class CLI(argparse.ArgumentParser):
                 sink = self._get_sink(args, sampler)
             it = self._get_source_trial_iter(source, args, finished=False)
             for trial in sched.schedule(it):
+                if trial.result is not None:
+                    if trial.result.is_error:
+                        traceback.print_exception(trial.result.error, file=sys.stderr)
+                    elif trial.result.is_pruned:
+                        print(
+                            "pruned",
+                            trial.uuid,
+                            trial.result.prune_reason,
+                            file=sys.stderr,
+                        )
                 sink.put_trial(trial)
 
     def _subcommand_pump(self, args):
