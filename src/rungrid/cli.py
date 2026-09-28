@@ -1,12 +1,12 @@
 """Command-line interface and parsing utilities for running rungrid experiments."""
 
-import traceback
 import argparse
 import shutil
 import sys
-from collections.abc import Callable
+import traceback
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import joblib
 import optuna
@@ -32,6 +32,7 @@ class CLI(argparse.ArgumentParser):
         self.rgrc_ctx_help = f"(will be run in the context of {_RGRC_PY})"
 
     def _get_rgrc_environment(self) -> dict[str, Any]:
+        sys.path.append(".")
         rgrc = getattr(self, "_rgrc", None)
         if rgrc is None:
             with open(_RGRC_PY, "r") as file:
@@ -39,7 +40,7 @@ class CLI(argparse.ArgumentParser):
             code = compile(content, _RGRC_PY, "exec")
             rgrc = {"__file__": str(Path(_RGRC_PY).absolute()), "__name__": "rgrc"}
             exec(code, rgrc)
-            setattr(self, "_rgrc", rgrc)
+            self._rgrc = rgrc
         return rgrc
 
     def _get_source(self, args, *extra_sources: Source) -> Source:
