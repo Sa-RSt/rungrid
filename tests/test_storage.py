@@ -1,3 +1,4 @@
+import csv
 import datetime
 import io
 from uuid import uuid4
@@ -31,6 +32,35 @@ def test_csv_sink():
     assert "42" in row
     # tags should be semicolon separated inside CSV
     assert "tag1;tag2" in row or "tag2;tag1" in row
+
+
+def test_csv_sink_saves_trial_traces():
+    """Verify that CSVSink correctly writes trial traces to CSV output."""
+    stream = io.StringIO()
+    sink = CSVSink(stream)
+
+    v = VarNamespace(set())
+    trial = StaleTrial(1, uuid4(), v)
+    trial.append_trace("loss", 0.5, epoch=1)
+    trial.append_trace("loss", 0.25, epoch=2)
+    trial.append_trace("accuracy", 0.95)
+
+    sink.put_trial(trial)
+
+    stream.seek(0)
+    reader = csv.reader(stream)
+    header = next(reader)
+    row = next(reader)
+
+    trace_idx = header.index("trace")
+    trace_col = row[trace_idx]
+
+    expected_loss = "loss:[(0.5, {'epoch': 1}), (0.25, {'epoch': 2})]"
+    expected_acc = "accuracy:[(0.95, {})]"
+
+    assert expected_loss in trace_col
+    assert expected_acc in trace_col
+    assert trace_col == f"{expected_loss};{expected_acc}" or trace_col == f"{expected_acc};{expected_loss}"
 
 
 def test_bucket_file_storage(tmp_path):

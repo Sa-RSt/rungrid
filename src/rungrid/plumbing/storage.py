@@ -294,8 +294,13 @@ class CSVSink(Sink):
                 "result",
                 "error",
                 "prune_reason",
+                "trace",
             ]
         )
+
+    @staticmethod
+    def _format_trace(trial: Trial, key: str) -> str:
+        return repr(list(trial.trace_all(key)))
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
         """Write a sequence of trials to the CSV stream.
@@ -322,6 +327,9 @@ class CSVSink(Sink):
                     repr(s.result.prune_reason)
                     if s.result is not None and s.result.prune_reason is not None
                     else "",
+                    ";".join(
+                        f"{key}:{self._format_trace(s, key)}" for key in s.trace_keys()
+                    ),
                 ]
                 for s in stales
             ]

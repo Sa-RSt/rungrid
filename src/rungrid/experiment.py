@@ -4,19 +4,16 @@ import functools
 import inspect
 import random
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from threading import local as thread_local
 from functools import lru_cache
+from threading import local as thread_local
 from types import MethodType
 from typing import (
     Any,
     Generic,
-    Iterable,
     NoReturn,
-    Sequence,
-    Type,
     TypeVar,
     final,
 )
@@ -44,7 +41,7 @@ def _check_range(minimum, maximum) -> None:
         )
 
 
-def _check_type(name: str, val: Any, t: Type) -> None:
+def _check_type(name: str, val: Any, t: type) -> None:
     if not isinstance(val, t):
         raise TypeError(f"{name}: expected type {t.__name__}, got {type(val).__name__}")
 
@@ -690,7 +687,7 @@ def step_method(
         for k, v in sig.parameters.items():
             if v.default != v.empty:
                 rungrid_warn(
-                    f"step_method: {v.__qualname__}: state argument {k} has a default value - "
+                    f"step_method: {fn.__qualname__}: state argument {k} has a default value - "
                     + "this makes its initialization prone to typing errors. Please consider "
                     + "initializing your arguments manually",
                     UserWarning,
@@ -1095,6 +1092,7 @@ class Trial(ABC):
         self._tags: set[str] = set(tags)
         self._result: TrialResult | None = None
         self._step_records = list(step_records)
+        self._traces: dict[str, list[tuple[Any, dict[str, Any]]]] = {}
 
     @property
     def experiment_idents(self) -> set[str]:
@@ -1201,10 +1199,10 @@ class Trial(ABC):
         self._step_records.append(es.record(start, end, next_step_name, **kwargs))
 
     def as_stale(self) -> "StaleTrial":
-        """Convert this trial to a StoredTrial snapshot.
+        """Convert this trial to a StaleTrial snapshot.
 
-        :return: A serialized-friendly StoredTrial instance.
-        :rtype: StoredTrial
+        :return: A serialize-friendly StaleTrial instance.
+        :rtype: StaleTrial
         """
         stale = StaleTrial(
             self.optuna_trial_number,
@@ -1215,6 +1213,7 @@ class Trial(ABC):
         )
         if self._result is not None:
             stale._result = self._result
+        stale._traces = self._traces.copy()
         return stale
 
     def with_result(self, result: TrialResult) -> "StaleTrial":
@@ -1236,6 +1235,91 @@ class Trial(ABC):
         :rtype: bool
         """
         return self.result is not None
+
+    def append_trace(self, key: str, value: Any, **info) -> None:
+        """Append a value to a trace identified by the key with optional extra information.
+
+        A trace is a list, uniquely identified by a key across a trial, of objects considered
+        of interest to a trial. Each entry on the list may contain additional information. Traces
+        are saved alongside other trial data and can be inspected with the `Trial.trace_*` methods.
+
+        One example of usage is to record loss curves across training steps.
+
+        :param key: The key that identifies the trace.
+        :type key: str
+        :param value: The value to append to the trace.
+        :type key: Any
+        :param info: Optional arbitrary extra information for this entry on the trace.
+        :type info: Any
+        """
+        try:
+            ls = self._traces[key]
+        except KeyError:
+            ls = []
+            self._traces[key] = ls
+        ls.append((value, info))
+
+    def trace_values(self, key: str) -> Iterable[Any]:
+        """Iterate over all values for a given trace for this trial, in the same order they
+        were appended to it, excluding extra information. See `Trial.append_trace` for more
+        on traces.
+
+        :param key: The key that identifies the trace.
+        :type key: str
+        :return: A iterable of the values appended to the trace.
+        :rtype: collections.abc.Iterable[Any]
+        """
+        yield from (x[0] for x in self._traces[key])
+
+    def trace_all(self, key: str) -> Iterable[tuple[Any, dict[str, Any]]]:
+        """Iterate over all values for a given trace for this trial, in the same order they
+        were appended to it, including extra information. See `Trial.append_trace` for more
+        on traces.
+
+        :param key: The key that identifies the trace.
+        :type key: str
+        :return: A iterable of the values and extra information appended to the trace.
+        :rtype: collections.abc.Iterable[tuple[Any, dict[str, Any]]]
+        """
+        yield from self._traces[key]
+
+    def trace_items(self, key: str, *info_keys: str) -> Iterable[list[Any]]:
+        """Iterate over all values for a given trace for this trial, in the same order they
+        were appended to it, the extra information keys given by `info_keys`.
+
+        This is a convenience method to avoid manually indexing the information dictionary
+        during iterations. Instead of:
+        ```
+        for train_loss, info in trial.trace_all('loss_curve'):
+            epoch_number = info['epoch']
+            ...
+        ```
+        you may write:
+        ```
+        for train_loss, epoch_number in trial.trace_items('loss_curve', 'epoch'):
+            ...
+        ```
+
+        See `Trial.append_trace` for more on traces.
+
+        :param key: The key that identifies the trace.
+        :type key: str
+        :param info_keys: The names of the extra information data to yield.
+        :type info_keys: str
+        :return: A iterable of the values and extra information appended to the trace.
+        :rtype: collections.abc.Iterable[list[Any]]
+        """
+        for value, info in self.trace_all(key):
+            yield [value] + [info.get(k, None) for k in info_keys]
+
+    def trace_keys(self) -> Iterable[str]:
+        """Iterate over the keys of all traces in this trial. See `Trial.append_trace`
+        for more on traces.
+
+        :return: A iterable of the keys.
+        :rtype: collections.abc.Iterable[str]
+        """
+        yield from self._traces.keys()
 
 
 class LiveTrial(Trial):
