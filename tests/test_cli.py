@@ -351,3 +351,52 @@ snk2 = InMemoryStorage()
     assert len(rgrc1["snk1"].trials) == 1
     assert rgrc1["snk1"].trials[0].optuna_trial_number == 1
     assert len(rgrc2["snk2"].trials) == 0
+
+
+def test_options(run_in_tmp_dir):
+    """Verify that the CLI pump and run subcommands accurately parse -D options and they are accessible from executing code."""
+    rgrc_content = """
+from rungrid.cli import CLI
+from rungrid.experiment import Experiment, step_method
+
+opts = CLI.get_instance().get_options()
+value_1 = opts.get('one', None)
+value_2 = opts.get('two', None)
+
+class OptionsExp(Experiment):
+    def version(self) -> str:
+        return "sched-cli-1.0"
+
+    def variables(self, v, s) -> None:
+        v.x = 1
+
+    def first_step(self):
+        return self.step_one
+
+    @step_method()
+    def step_one(self, trial, **kwargs):
+        return "done"
+"""
+    with open("rgrc.py", "w") as f:
+        f.write(rgrc_content)
+
+    CLI.get_instance.cache_clear()
+    cli = CLI.get_instance()
+    cli.run(["pump", "-D", "one=3", "-D", "two=4"])
+    rgrc = cli._get_rgrc_environment()
+    assert rgrc["value_1"] == "3"
+    assert rgrc["value_2"] == "4"
+
+    CLI.get_instance.cache_clear()
+    cli = CLI.get_instance()
+    cli.run(["run", "-D", "one=abc", "OptionsExp"])
+    rgrc = cli._get_rgrc_environment()
+    assert rgrc["value_1"] == "abc"
+    assert rgrc["value_2"] is None
+
+    CLI.get_instance.cache_clear()
+    cli = CLI.get_instance()
+    cli.run(["pump", "-D", "two"])
+    rgrc = cli._get_rgrc_environment()
+    assert rgrc["value_1"] is None
+    assert rgrc["value_2"] == ""

@@ -5,6 +5,7 @@ import shutil
 import sys
 import traceback
 from collections.abc import Callable, Iterable
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,15 @@ class CLI(argparse.ArgumentParser):
         self.rgrc_help = f"(must be declared or imported in {_RGRC_PY})"
         self.rgrc_ctx_help = f"(will be run in the context of {_RGRC_PY})"
 
+    @lru_cache
+    @staticmethod
+    def get_instance():
+        return CLI()
+
+    def get_options(self) -> dict[str, str]:
+        """Get a dictionary of options set using the -D, --option flags."""
+        return getattr(self, "_cmdline_options", {})
+
     def _get_rgrc_environment(self) -> dict[str, Any]:
         sys.path.append(".")
         rgrc = getattr(self, "_rgrc", None)
@@ -42,6 +52,13 @@ class CLI(argparse.ArgumentParser):
             exec(code, rgrc)
             self._rgrc = rgrc
         return rgrc
+
+    def _parse_options(self, args) -> None:
+        opts = {}
+        for line in args.option or []:
+            key, _, value = line.partition("=")
+            opts[key] = value
+        self._cmdline_options = opts
 
     def _get_source(self, args, *extra_sources: Source) -> Source:
         rgrc = self._get_rgrc_environment()
@@ -134,6 +151,7 @@ class CLI(argparse.ArgumentParser):
         )
 
     def _subcommand_run(self, args):
+        self._parse_options(args)
         with joblib.parallel_config(n_jobs=args.jobs):
             rgrc = self._get_rgrc_environment()
             study_factory: Callable[[str], optuna.Study] | None = rgrc.get(
@@ -171,6 +189,7 @@ class CLI(argparse.ArgumentParser):
                 sink.put_trial(trial)
 
     def _subcommand_pump(self, args):
+        self._parse_options(args)
         source = self._get_source(args)
         sink = self._get_sink(args)
         for trial in self._get_source_trial_iter(source, args, finished=None):
@@ -198,12 +217,14 @@ class CLI(argparse.ArgumentParser):
         )
         self._add_source_sink_args(run)
         self._add_runner_args(run)
+        self._add_option_args(run)
         run.set_defaults(rg_subcommand_fn=self._subcommand_run)
         pump = subparsers.add_parser(
             "pump",
             help="pump trials from sources to sinks (can be used for exporting)",
         )
         self._add_source_sink_args(pump)
+        self._add_option_args(pump)
         pump.set_defaults(rg_subcommand_fn=self._subcommand_pump)
         init = subparsers.add_parser(
             "init", help="initialize current directory with a template"
@@ -314,4 +335,15 @@ class CLI(argparse.ArgumentParser):
             help='name of the Optuna Study factory function to use, such as "study_factory" (default: don\'t use Optuna) '
             + self.rgrc_help,
             default=None,
+        )
+
+    def _add_option_args(self, subparser):
+        subparser.add_argument(
+            "-D",
+            "--option",
+            metavar="KEY[=VALUE]",
+            action="append",
+            help="set a key-value pair option accessible via "
+            + "`rungrid.cli.CLI.get_instance().get_options()`, "
+            + "can be used multiple times. If value is omitted, it is set to the empty string.",
         )
