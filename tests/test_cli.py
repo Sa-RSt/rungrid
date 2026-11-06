@@ -61,7 +61,7 @@ my_sink = InMemoryStorage()
     assert exp is not None
     assert exp.name == "CliDummyExperiment"
 
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     sink_instance = rgrc["my_sink"]
     assert [x.optuna_trial_number for x in sink_instance.trials] == [2, 4]
 
@@ -91,7 +91,7 @@ snk = InMemoryStorage()
     cli.run(["pump", "-i", "src", "-o", "snk", "-T", "pass"])
 
     # Load rgrc environment to verify the simple sink has trials
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     sink_instance = rgrc["snk"]
     assert len(sink_instance.trials) == 2
     assert all("pass" in t.tags for t in sink_instance.trials)
@@ -179,7 +179,7 @@ class OptunaCliExperiment(Experiment):
     assert exp is not None
 
     # Load rgrc environment to verify trial output
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     sink_instance = rgrc["my_sink"]
     assert len(sink_instance.trials) == 1
     assert sink_instance.trials[0].result.result == 4.5
@@ -217,7 +217,7 @@ my_scheduler = LocalDispatcher.make_default(SchedCliExperiment(), ".rg-cache-tes
     cli = CLI()
     cli.run(["run", "-i", "my_source", "-o", "my_sink", "my_scheduler"])
 
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     assert "my_scheduler" in rgrc
 
 
@@ -259,7 +259,7 @@ my_scheduler = LocalDispatcher.make_default(JobsMultipleCliExperiment(), ".rg-ca
     # Run with 2 jobs
     cli.run(["run", "-i", "my_source", "-o", "my_sink", "--jobs", "2", "my_scheduler"])
 
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     assert "my_scheduler" in rgrc
     sched = rgrc["my_scheduler"]
     assert sched._job.n_jobs == 2
@@ -305,7 +305,7 @@ my_scheduler = LocalDispatcher.make_default(JobsOneCliExperiment(), ".rg-cache-t
     # Run with 1 job (sequential, no subprocesses)
     cli.run(["run", "-i", "my_source", "-o", "my_sink", "--jobs", "1", "my_scheduler"])
 
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     assert "my_scheduler" in rgrc
     sched = rgrc["my_scheduler"]
     assert sched._job.n_jobs == 1
@@ -346,8 +346,8 @@ snk2 = InMemoryStorage()
         ["pump", "-i", "src", "-o", "snk2", "-P", "trial.optuna_trial_number == 42"]
     )
 
-    rgrc1 = cli1._get_rgrc_environment()
-    rgrc2 = cli2._get_rgrc_environment()
+    rgrc1 = cli1.get_rgrc_environment()
+    rgrc2 = cli2.get_rgrc_environment()
     assert len(rgrc1["snk1"].trials) == 1
     assert rgrc1["snk1"].trials[0].optuna_trial_number == 1
     assert len(rgrc2["snk2"].trials) == 0
@@ -383,20 +383,20 @@ class OptionsExp(Experiment):
     CLI.get_instance.cache_clear()
     cli = CLI.get_instance()
     cli.run(["pump", "-D", "one=3", "-D", "two=4"])
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     assert rgrc["value_1"] == "3"
     assert rgrc["value_2"] == "4"
 
     CLI.get_instance.cache_clear()
     cli = CLI.get_instance()
     cli.run(["run", "-D", "one=abc", "OptionsExp"])
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     assert rgrc["value_1"] == "abc"
     assert rgrc["value_2"] is None
 
     CLI.get_instance.cache_clear()
     cli = CLI.get_instance()
     cli.run(["pump", "-D", "two"])
-    rgrc = cli._get_rgrc_environment()
+    rgrc = cli.get_rgrc_environment()
     assert rgrc["value_1"] is None
     assert rgrc["value_2"] == ""

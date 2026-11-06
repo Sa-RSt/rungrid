@@ -35,13 +35,23 @@ class CLI(argparse.ArgumentParser):
     @lru_cache
     @staticmethod
     def get_instance():
+        """Get the CLI instance created by executing the "pythonn -m rungrid" script."""
         return CLI()
 
     def get_options(self) -> dict[str, str]:
         """Get a dictionary of options set using the -D, --option flags."""
         return getattr(self, "_cmdline_options", {})
 
-    def _get_rgrc_environment(self) -> dict[str, Any]:
+    def get_rgrc_environment(self) -> dict[str, Any]:
+        """Returns the environment of the rgrc.py file.
+
+        If this instance has already executed an rgrc.py file, the old
+        environment is returned as a reference. Otherwise, the rgrc.py
+        file is searched for in the current working directory and executed.
+
+        :return: The global namespace of rgrc.py's module.
+        :rtype: dict[str, Any]
+        """
         sys.path.append(".")
         rgrc = getattr(self, "_rgrc", None)
         if rgrc is None:
@@ -61,7 +71,7 @@ class CLI(argparse.ArgumentParser):
         self._cmdline_options = opts
 
     def _get_source(self, args, *extra_sources: Source) -> Source:
-        rgrc = self._get_rgrc_environment()
+        rgrc = self.get_rgrc_environment()
         sources_code: list[str] = (args.source or []) + (args.source_sink or [])
         sources = [eval(x, rgrc) for x in sources_code]
         for expr, source in zip(sources_code, sources):
@@ -78,7 +88,7 @@ class CLI(argparse.ArgumentParser):
             return MultiSource(sources)
 
     def _get_sink(self, args, *extra_sinks: Sink) -> Sink:
-        rgrc = self._get_rgrc_environment()
+        rgrc = self.get_rgrc_environment()
         sinks_code: list[str] = (args.sink or []) + (args.source_sink or [])
         sinks = [eval(x, rgrc) for x in sinks_code]
         for expr, sink in zip(sinks_code, sinks):
@@ -99,7 +109,7 @@ class CLI(argparse.ArgumentParser):
     def _get_source_trial_iter(
         self, source: Source, args, finished: bool | None
     ) -> Iterable[Trial]:
-        rgrc = self._get_rgrc_environment()
+        rgrc = self.get_rgrc_environment()
         predicate_code = compile(args.predicate, "<string>", "eval")
         status_to_finished = {"finished": True, "unfinished": False, None: None}
         args_finished = status_to_finished[args.status]
@@ -153,7 +163,7 @@ class CLI(argparse.ArgumentParser):
     def _subcommand_run(self, args):
         self._parse_options(args)
         with joblib.parallel_config(n_jobs=args.jobs):
-            rgrc = self._get_rgrc_environment()
+            rgrc = self.get_rgrc_environment()
             study_factory: Callable[[str], optuna.Study] | None = rgrc.get(
                 args.study_factory, None
             )
