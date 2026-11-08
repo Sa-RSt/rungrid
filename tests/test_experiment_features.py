@@ -170,7 +170,9 @@ def test_experiment_with_multiple_first_steps_raises():
 def test_experiment_duplicate_name_raises():
     BasicExperiment.get_instance()
 
-    with pytest.raises(StructureError, match='non-unique experiment name "BasicExperiment"'):
+    with pytest.raises(
+        StructureError, match='non-unique experiment name "BasicExperiment"'
+    ):
         BasicExperiment(Experiment._Experiment__singleton)
 
 
@@ -201,9 +203,7 @@ def test_step_method_annotated_state_is_not_dropped():
 def test_step_trim_kwargs():
     step = make_step(arg_names={"a", "b"})
 
-    trimmed = step.trim_kwargs(
-        {"a": 1, "b": 2, "c": 3, "self": 4, "trial": 5}
-    )
+    trimmed = step.trim_kwargs({"a": 1, "b": 2, "c": 3, "self": 4, "trial": 5})
 
     assert trimmed == {"a": 1, "b": 2}
 
@@ -314,9 +314,10 @@ def test_exit_next_step_explicit_kwargs_override_locals():
 def test_step_from_fn_accepts_known_step():
     exp = BasicExperiment.get_instance()
 
-    assert exp._step_from_fn(exp.step_two) is exp.steps[
-        next(k for k in exp.steps if k.endswith("step_two"))
-    ]
+    assert (
+        exp._step_from_fn(exp.step_two)
+        is exp.steps[next(k for k in exp.steps if k.endswith("step_two"))]
+    )
 
 
 def test_fixture_caches_by_arguments():
@@ -377,7 +378,9 @@ def test_fixture_respects_max_size():
 
 
 def test_fixture_requires_self_argument():
-    with pytest.raises(StructureError, match='fixtures must have an argument called "self"'):
+    with pytest.raises(
+        StructureError, match='fixtures must have an argument called "self"'
+    ):
 
         @fixture()
         def no_self(value):
@@ -652,8 +655,9 @@ def test_first_step_rejects_extra_positional_argument():
 
 
 def test_first_step_rejects_extra_argument_with_default():
-    with pytest.warns(UserWarning), pytest.raises(
-        StructureError, match="first step must only accept"
+    with (
+        pytest.warns(UserWarning),
+        pytest.raises(StructureError, match="first step must only accept"),
     ):
 
         class DefaultArgumentFirstExperiment(Experiment):
@@ -669,8 +673,9 @@ def test_first_step_rejects_extra_argument_with_default():
 
 
 def test_first_step_rejects_keyword_only_argument():
-    with pytest.warns(UserWarning), pytest.raises(
-        StructureError, match="first step must only accept"
+    with (
+        pytest.warns(UserWarning),
+        pytest.raises(StructureError, match="first step must only accept"),
     ):
 
         class KeywordOnlyFirstExperiment(Experiment):

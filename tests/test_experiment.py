@@ -5,6 +5,7 @@ import pytest
 from rungrid.experiment import (
     Experiment,
     ExperimentRegistry,
+    SamplingStrategy,
     StaleTrial,
     Trial,
     VarNamespace,
@@ -69,8 +70,6 @@ def test_trial_properties():
 
 def test_varnamespace_assign_sampling_strategy_raises_structure_error():
     """Verify assigning a SamplingStrategy directly to VarNamespace attribute does NOT raise ValueError (old behavior)."""
-    import pytest
-    from rungrid.experiment import SamplingStrategy
 
     v = VarNamespace(set())
     ss = SamplingStrategy("dummy", lambda name: 42, set(), lambda x: x)
@@ -80,7 +79,7 @@ def test_varnamespace_assign_sampling_strategy_raises_structure_error():
 
 def test_varnamespace_duplicate_sampling_raises_structure_error():
     """Verify sampling a variable name that is already in use in tracker raises StructureError."""
-    import pytest
+
     from rungrid.error import StructureError
     from rungrid.experiment import SamplingStrategy
 
@@ -92,7 +91,7 @@ def test_varnamespace_duplicate_sampling_raises_structure_error():
 
 def test_varnamespace_set_variable_sampling_strategy_raises_value_error():
     """Verify direct _set_variable call with a SamplingStrategy does NOT raise ValueError (old behavior)."""
-    import pytest
+
     from rungrid.experiment import SamplingStrategy
 
     v = VarNamespace(set())

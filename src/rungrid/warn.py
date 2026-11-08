@@ -12,4 +12,3 @@ def rungrid_warn(msg: str, cat: type[Warning]) -> None:
     :type cat: type[Warning]
     """
     warn(f"rungrid: {msg}", cat)
-

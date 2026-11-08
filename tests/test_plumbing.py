@@ -11,9 +11,9 @@ from rungrid.plumbing import (
     LoaderDumper,
     MultiSource,
     RandomMultiSink,
+    ResultPodiumSink,
     Source,
     StateSink,
-    ResultPodiumSink,
 )
 from rungrid.plumbing.storage import InMemoryStorage
 
@@ -191,7 +191,8 @@ def test_loader_dumper_invalid_backend_raises_key_error():
 def test_result_podium_sink():
     """Verify ResultPodiumSink tracks top-k best trials and triggers callback correctly."""
     from datetime import datetime
-    from rungrid.experiment import TrialResult, StaleTrial, VarNamespace
+
+    from rungrid.experiment import StaleTrial, TrialResult, VarNamespace
 
     v = VarNamespace(set())
     now = datetime.now()
@@ -289,7 +290,8 @@ def test_result_podium_sink():
 def test_state_sink():
     """Verify StateSink processes step records and extracts arguments correctly."""
     from datetime import datetime
-    from rungrid.experiment import StepRecord, StaleTrial, VarNamespace
+
+    from rungrid.experiment import StaleTrial, StepRecord, VarNamespace
 
     v = VarNamespace(set())
     now = datetime.now()

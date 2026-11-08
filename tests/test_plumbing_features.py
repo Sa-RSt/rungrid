@@ -5,9 +5,7 @@ import io
 import random
 from uuid import uuid4
 
-import pytest
-
-import rungrid.plumbing as plumbing
+from rungrid import plumbing
 from rungrid.experiment import StaleTrial, StepRecord, TrialResult, VarNamespace
 from rungrid.plumbing import (
     CopyingMultiSink,

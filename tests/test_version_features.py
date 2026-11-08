@@ -137,7 +137,9 @@ def test_version_from_mtime_derives_base_dir_from_class():
 
 
 def test_version_from_mtime_extension_type_raises():
-    with pytest.raises(RuntimeError, match="deducing base directory from extension types"):
+    with pytest.raises(
+        RuntimeError, match="deducing base directory from extension types"
+    ):
         version_from_most_recent_mtime(int)
 
 
@@ -160,9 +162,7 @@ def test_git_commit_success(mock_popen, tmp_path):
     process = make_process(b"commit deadbeef123\nAuthor: someone\n", b"", 0)
     mock_popen.return_value = process
 
-    result = version_from_git_commit_hash(
-        DummyClass, repository_location=tmp_path
-    )
+    result = version_from_git_commit_hash(DummyClass, repository_location=tmp_path)
 
     assert result == "deadbeef123"
     args, kwargs = mock_popen.call_args
@@ -176,7 +176,10 @@ def test_git_commit_success_skips_blank_lines(mock_popen, tmp_path):
     process = make_process(b"\n   \n\tcommit cafe123\n", b"", 0)
     mock_popen.return_value = process
 
-    assert version_from_git_commit_hash(DummyClass, repository_location=tmp_path) == "cafe123"
+    assert (
+        version_from_git_commit_hash(DummyClass, repository_location=tmp_path)
+        == "cafe123"
+    )
 
 
 @patch("subprocess.Popen")
@@ -220,7 +223,9 @@ def test_git_commit_derives_repository_location_from_class(mock_popen):
 
 
 def test_git_commit_extension_type_raises():
-    with pytest.raises(RuntimeError, match="deducing base directory from extension types"):
+    with pytest.raises(
+        RuntimeError, match="deducing base directory from extension types"
+    ):
         version_from_git_commit_hash(int)
 
 

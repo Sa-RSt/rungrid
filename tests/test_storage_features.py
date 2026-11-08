@@ -407,9 +407,7 @@ def test_bucket_storage_moves_finished_trial_from_unfinished(tmp_path):
     trial = make_trial(1)
     storage.put_trial(trial)
 
-    finished = trial.with_result(
-        TrialResult.make_ok("done", datetime.datetime.now())
-    )
+    finished = trial.with_result(TrialResult.make_ok("done", datetime.datetime.now()))
     storage.put_trial(finished)
 
     assert [t.uuid for t in storage.get_trials(finished=True)] == [trial.uuid]
@@ -555,7 +553,9 @@ def test_lock_retries_with_exponential_backoff(monkeypatch):
         def release(self):
             releases.append(1)
 
-    monkeypatch.setattr(storage_module.time, "sleep", lambda delay: sleeps.append(delay))
+    monkeypatch.setattr(
+        storage_module.time, "sleep", lambda delay: sleeps.append(delay)
+    )
 
     with _lock(FlakyLock()):
         pass

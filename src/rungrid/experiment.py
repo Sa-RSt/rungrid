@@ -677,9 +677,7 @@ class Sampler:
             alt_name = trans.__name__
         return SamplingStrategy(
             ss.name + f"/list_transformed({alt_name}:{length})",
-            lambda name: [
-                trans(i, ss.sample(name + f"_L{i}")) for i in range(length)
-            ],
+            lambda name: [trans(i, ss.sample(name + f"_L{i}")) for i in range(length)],
             self._variable_names,
             self._branch_name(),
         )

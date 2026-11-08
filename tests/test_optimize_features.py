@@ -5,7 +5,6 @@ import itertools
 from uuid import uuid4
 
 import optuna
-import pytest
 
 from rungrid.experiment import (
     Experiment,
@@ -86,9 +85,7 @@ def test_optimizing_sampler_consume_and_tag_selects_matching_trial():
     exp = OptimizeFeatureConstantExperiment.get_instance()
     sampler = OptimizingSampler(exp, study)
 
-    trial = sampler.consume_and_tag(
-        "chosen", predicate=lambda trial: trial.v.x == 1
-    )
+    trial = sampler.consume_and_tag("chosen", predicate=lambda trial: trial.v.x == 1)
 
     assert trial is not None
     assert "chosen" in trial.tags

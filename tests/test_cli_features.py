@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from rungrid.cli import CLI
-from rungrid.plumbing import CopyingMultiSink, Empty, MultiSource, Sink, Source
+from rungrid.plumbing import CopyingMultiSink, Empty, MultiSource, Source
 from rungrid.plumbing.storage import CSVSink, InMemoryStorage
 
 
@@ -156,9 +156,7 @@ snk2 = InMemoryStorage()
     single = cli._get_source(SimpleNamespace(source=["src1"], source_sink=None))
     assert isinstance(single, InMemoryStorage)
 
-    multi = cli._get_source(
-        SimpleNamespace(source=["src1", "src2"], source_sink=None)
-    )
+    multi = cli._get_source(SimpleNamespace(source=["src1", "src2"], source_sink=None))
     assert isinstance(multi, MultiSource)
     assert len(multi._sources) == 2
 
@@ -174,9 +172,7 @@ both = InMemoryStorage()
     )
     cli = CLI()
 
-    source = cli._get_source(
-        SimpleNamespace(source=["src"], source_sink=["both"])
-    )
+    source = cli._get_source(SimpleNamespace(source=["src"], source_sink=["both"]))
 
     assert isinstance(source, MultiSource)
     assert len(source._sources) == 2
@@ -204,9 +200,7 @@ empty = Empty()
     cli = CLI()
 
     assert isinstance(
-        cli._get_sink(
-            SimpleNamespace(sink=None, source_sink=None, csv_sink=None)
-        ),
+        cli._get_sink(SimpleNamespace(sink=None, source_sink=None, csv_sink=None)),
         Empty,
     )
 
@@ -246,9 +240,7 @@ def test_get_sink_rejects_non_sink_expression(run_in_tmp_dir):
     cli = CLI()
 
     with pytest.raises(TypeError, match="expected a Sink instance"):
-        cli._get_sink(
-            SimpleNamespace(sink=["value"], source_sink=None, csv_sink=None)
-        )
+        cli._get_sink(SimpleNamespace(sink=["value"], source_sink=None, csv_sink=None))
 
 
 # ---------------------------------------------------------------------------
@@ -283,9 +275,7 @@ def test_source_trial_iter_uses_predicate_status_tag_and_limit(run_in_tmp_dir):
         (None, None, None),
     ],
 )
-def test_source_trial_iter_status_override(
-    run_in_tmp_dir, status, finished, expected
-):
+def test_source_trial_iter_status_override(run_in_tmp_dir, status, finished, expected):
     write_rgrc(run_in_tmp_dir, "marker = 1\n")
     cli = CLI()
     source = RecordingSource()

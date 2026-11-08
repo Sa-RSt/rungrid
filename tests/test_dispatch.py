@@ -86,9 +86,10 @@ def test_local_dispatcher_caching(tmp_path):
 def test_dispatch_structure_errors():
     """Verify dispatch structure errors are raised when step or experiment is unregistered."""
     import pytest
+
+    from rungrid.dispatch import _cached_step_execution, _experiment_from_step
     from rungrid.error import StructureError
     from rungrid.experiment import ExperimentStep
-    from rungrid.dispatch import _experiment_from_step, _cached_step_execution
 
     dummy_step = ExperimentStep(
         name="dummy_nonexistent",

@@ -80,6 +80,7 @@ def test_version_from_git_commit_hash_failure(mock_popen):
 
 def test_version_mtime_extension_type_raises_runtime_error():
     """Verify calling version_from_most_recent_mtime with extension type and no base_dir raises RuntimeError."""
-    with pytest.raises(RuntimeError, match="deducing base directory from extension types"):
+    with pytest.raises(
+        RuntimeError, match="deducing base directory from extension types"
+    ):
         version_from_most_recent_mtime(int, base_dir=None)
-

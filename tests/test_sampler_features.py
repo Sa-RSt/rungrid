@@ -334,9 +334,7 @@ def test_boolean_name_is_categorical():
 def test_random_selects_among_values_and_strategies():
     rng = random.Random(123)
     v, _, _ = sample_one(
-        lambda v, s: setattr(
-            v, "x", s.random([1, "two", s.precomputed(3)], rng=rng)
-        )
+        lambda v, s: setattr(v, "x", s.random([1, "two", s.precomputed(3)], rng=rng))
     )
 
     assert v.x in {1, "two", 3}
@@ -450,9 +448,7 @@ def test_transformed_rejects_non_string_alt_name():
 
 
 def test_list_samples_multiple_values():
-    v, _, _ = sample_one(
-        lambda v, s: setattr(v, "x", s.list(s.integer(0, 10), 3))
-    )
+    v, _, _ = sample_one(lambda v, s: setattr(v, "x", s.list(s.integer(0, 10), 3)))
 
     assert isinstance(v.x, list)
     assert len(v.x) == 3
