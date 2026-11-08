@@ -164,15 +164,45 @@ class Sampler:
     categorical options, combinations, and sequences) while maintaining parameter trackers.
     """
 
-    def __init__(self, optuna_trial: optuna.Trial) -> None:
+    def __init__(self, trial_id: UUID, optuna_study: optuna.Study) -> None:
         """Initialize the Sampler.
 
+        :param trial_id: The UUID of the Rungrid trial.
+        :type trial_id: uuid.UUID
         :param optuna_trial: The underlying Optuna trial used for suggesting values.
         :type optuna_trial: optuna.Trial
         """
-        self._optuna_trial = optuna_trial
+        self._trial_id = str(trial_id)
+        self._optuna_study = optuna_study
+        self._optuna_trial: optuna.Trial | None = None
         self._variable_names: set[str] = set()
+        self._sampling_strategies: Iterable[SamplingStrategy] = []
         self._branch_stack: list[str] = []
+        self._finished = False
+
+    def _make_var_namespace(self) -> "VarNamespace":
+        vn = VarNamespace(self._variable_names)
+        self._sampling_strategies = vn._sampling_strategies.values()
+        return vn
+
+    def dispose(self):
+        """Clean up method to be called after sampling and before the trial begins."""
+        if self._finished:
+            return
+        self._finished = True
+        for strat in self._sampling_strategies:
+            strat.dispose()
+    def get_optuna_trial(self) -> optuna.Trial:
+        """Get the underlying optuna trial.
+        This method will ask for a trial if none has been asked yet.
+        """
+        if self._optuna_trial is None:
+            self._optuna_trial = self._optuna_study.ask()
+        return self._optuna_trial
+
+    def has_asked_optuna(self) -> bool:
+        """Return True if this Sampler has called the `ask` method on the optuna study."""
+        return self._optuna_trial is not None
 
     def _maybe_wrap_precomputed(self, s) -> SamplingStrategy:
         if not isinstance(s, SamplingStrategy):
@@ -251,8 +281,31 @@ class Sampler:
         _check_range(lower, upper)
         return SamplingStrategy(
             f"integer({lower},{upper})",
-            lambda name: self._optuna_trial.suggest_int(name, lower, upper),
+            lambda name: self.get_optuna_trial().suggest_int(name, lower, upper),
             self._variable_names,
+            self._branch_name(),
+        )
+
+    def power_of_two(self, lower: int, upper: int) -> SamplingStrategy:
+        """Convenience method for `integer_power` with base = 2."""
+        return self.integer_power(2, lower, upper)
+
+    def integer_power(self, base: int, lower: int, upper: int) -> SamplingStrategy:
+        """Sample a variable of the form base**x, where lower <= x <= upper.
+
+        :param base: The base of the exponential.
+        :type base: int
+        :param lower: The lower bound of the range (inclusive).
+        :type lower: int
+        :param upper: The upper bound of the range (exclusive/inclusive depending on backend).
+        :type upper: int
+        :return: An integer power SamplingStrategy.
+        :rtype: SamplingStrategy
+        :raises ValueError: If lower is greater than or equal to upper.
+        :raises TypeError: If lower or upper is not a float.
+        """
+        return self.transformed(
+            self.integer(lower, upper), lambda x: base**x, f"pow_{base}"
         )
 
     def uniform(self, lower: float, upper: float) -> SamplingStrategy:

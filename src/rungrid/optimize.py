@@ -1,12 +1,19 @@
 """Optuna integration for sampling and optimizing experiment trials."""
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from uuid import uuid4
 
 import optuna
 
-from rungrid.experiment import Experiment, LiveTrial, Sampler, Trial, VarNamespace
-from rungrid.plumbing import Sink, Source, PredicateType
+from rungrid.experiment import (
+    Experiment,
+    LiveTrial,
+    Sampler,
+    StaleTrial,
+    Trial,
+    VarNamespace,
+)
+from rungrid.plumbing import PredicateType, Sink, Source
 
 
 class OptimizingSampler(Source, Sink):
@@ -16,17 +23,29 @@ class OptimizingSampler(Source, Sink):
     completed trial results to the study for sequential model-based optimization.
     """
 
-    def __init__(self, experiment: Experiment, study: optuna.Study) -> None:
+    def __init__(
+        self,
+        experiment: Experiment,
+        study: optuna.Study,
+        sampler: None | Callable[[VarNamespace, Sampler], None] = None,
+    ) -> None:
         """Initialize the OptimizingSampler.
 
         :param experiment: The experiment instance that defines parameters.
         :type experiment: Experiment
         :param study: The Optuna Study used to guide sampling and track results.
         :type study: optuna.Study
+        :param sampler: Another callable to use instead of `Experiment.variables()` to
+        populate the experiment's variables.
+        :type sampler: None | Callable[[VarNamespace, Sampler], None]
         """
         super().__init__()
         self._experiment = experiment
         self._study = study
+        if sampler is None:
+            self._sampler = experiment.variables
+        else:
+            self._sampler = sampler
 
     def get_trials(
         self, *, finished: bool | None = None, search_tag: str | None = None
@@ -44,16 +63,18 @@ class OptimizingSampler(Source, Sink):
         :return: An iterable of newly suggested trial instances.
         :rtype: collections.abc.Iterable[Trial]
         """
+        trial_uuid = uuid4()
         if finished or search_tag is not None:
             return
         while 1:
-            optuna_trial = self._study.ask()
-            s = Sampler(optuna_trial)
-            v = VarNamespace(s._variable_names)
-            self._experiment.variables(v, s)
-            for strat in v._sampling_strategies.values():
-                strat.dispose()
-            yield LiveTrial(optuna_trial, uuid4(), v)
+            s = Sampler(trial_uuid, self._study)
+            v = s._make_var_namespace()
+            self._sampler(v, s)
+            s.dispose()
+            if s.has_asked_optuna():
+                yield LiveTrial(s.get_optuna_trial(), trial_uuid, v)
+            else:
+                yield StaleTrial(None, trial_uuid, v)
 
     def consume_and_tag(
         self,
@@ -88,7 +109,7 @@ class OptimizingSampler(Source, Sink):
         :param trial: The trial containing results to report.
         :type trial: Trial
         """
-        if not trial.is_finished():
+        if trial.optuna_trial_number is None or not trial.is_finished():
             return
         assert trial.result is not None
         res = trial.result
