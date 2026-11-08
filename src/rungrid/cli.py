@@ -205,6 +205,14 @@ class CLI(argparse.ArgumentParser):
         for trial in self._get_source_trial_iter(source, args, finished=None):
             sink.put_trial(trial)
 
+    def _subcommand_eval(self, args):
+        self._parse_options(args)
+        expression = args.expression
+        code = compile(expression, "<command-line>", "eval")
+        namespace = self.get_rgrc_environment().copy()
+        namespace.update({"__file__": "<command-line>", "__name__": "__main__"})
+        print(eval(code, namespace))
+
     def run(self, args):
         """Parse command-line arguments and run the specified rungrid subcommand.
 
@@ -251,6 +259,14 @@ class CLI(argparse.ArgumentParser):
             choices=sorted(x.name for x in _TEMPLATES.iterdir()),
         )
         init.set_defaults(rg_subcommand_fn=self._subcommand_init)
+        eval_cmd = subparsers.add_parser("eval", help="evaluate a Python expression")
+        self._add_option_args(eval_cmd)
+        eval_cmd.add_argument(
+            "expression",
+            help="the Python expression to evaluate " + self.rgrc_ctx_help,
+            type=str,
+        )
+        eval_cmd.set_defaults(rg_subcommand_fn=self._subcommand_eval)
 
     def _add_source_sink_args(self, subparser) -> None:
         subparser.add_argument(

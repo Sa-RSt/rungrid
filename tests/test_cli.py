@@ -94,6 +94,18 @@ snk = InMemoryStorage()
     assert all("pass" in t.tags for t in sink_instance.trials)
 
 
+def test_cli_eval_subcommand(run_in_tmp_dir):
+    rgrc_content = """global_list = []"""
+    with open("rgrc.py", "w") as f:
+        f.write(rgrc_content)
+
+    cli = CLI()
+    cli.run(["eval", "global_list.append(123)"])
+
+    rgrc = cli.get_rgrc_environment()
+    assert rgrc["global_list"] == [123]
+
+
 def test_cli_csv_sink(run_in_tmp_dir):
     """Verify that CLI can log output to a CSV sink using the -C option."""
     rgrc_content = """
