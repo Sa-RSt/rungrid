@@ -209,7 +209,7 @@ class SchedCliExperiment(Experiment):
     def step_one(self, trial, **kwargs):
         return "done"
 
-my_scheduler = LocalDispatcher.make_default(SchedCliExperiment(), ".rg-cache-test")
+my_scheduler = LocalDispatcher.make_default(SchedCliExperiment.get_instance(), ".rg-cache-test")
 """
     with open("rgrc.py", "w") as f:
         f.write(rgrc_content)
@@ -250,7 +250,7 @@ class JobsMultipleCliExperiment(Experiment):
     def step_one(self, trial, **kwargs):
         return "done"
 
-my_scheduler = LocalDispatcher.make_default(JobsMultipleCliExperiment(), ".rg-cache-test")
+my_scheduler = LocalDispatcher.make_default(JobsMultipleCliExperiment.get_instance(), ".rg-cache-test")
 """
     with open("rgrc.py", "w") as f:
         f.write(rgrc_content)
@@ -296,7 +296,7 @@ class JobsOneCliExperiment(Experiment):
     def step_one(self, trial, **kwargs):
         return "done"
 
-my_scheduler = LocalDispatcher.make_default(JobsOneCliExperiment(), ".rg-cache-test")
+my_scheduler = LocalDispatcher.make_default(JobsOneCliExperiment.get_instance(), ".rg-cache-test")
 """
     with open("rgrc.py", "w") as f:
         f.write(rgrc_content)

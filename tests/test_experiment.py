@@ -33,8 +33,7 @@ def test_experiment_registry_and_initialization():
     """Verify that custom Experiments register themselves and populate steps correctly."""
     registry = ExperimentRegistry.get_instance()
 
-    # Instantiate DummyExperiment
-    exp = DummyExperiment()
+    exp = DummyExperiment.get_instance()
 
     # Should be registered under class name and identifier
     assert registry.get_by_name("DummyExperiment") is exp
@@ -122,7 +121,7 @@ def test_experiment_step_from_fn_unregistered_raises_lookup_error():
         def step_none(self, trial, **kwargs):
             return 42
 
-    exp = LookupErrorExperiment()
+    exp = LookupErrorExperiment.get_instance()
     with pytest.raises(LookupError, match="was not recognized as an experiment step"):
         exp._step_from_fn(lambda: None)
 
@@ -151,7 +150,7 @@ def test_unallowed_step_method_call_raises_runtime_error():
             assert isinstance(trial, Trial)
             return 44
 
-    exp = WaywardCallExperiment()
+    exp = WaywardCallExperiment.get_instance()
     t = StaleTrial(1, uuid4(), VarNamespace(set()))
     m = "direct call"
     with pytest.raises(RuntimeError, match=m):

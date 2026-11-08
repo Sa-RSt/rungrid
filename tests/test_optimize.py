@@ -98,7 +98,7 @@ def test_optimize_pipeline(tmp_path):
             return "done"
 
     study = optuna.create_study(direction="minimize")
-    exp = OptimizePipelineExperiment()
+    exp = OptimizePipelineExperiment.get_instance()
     sampler = OptimizingSampler(exp, study)
     dispatcher = LocalDispatcher.make_default(exp, tmp_path)
 
@@ -145,7 +145,7 @@ def test_sampling_strategy_pickles_successfully(tmp_path):
             return "done"
 
     study = optuna.create_study(direction="minimize")
-    exp = OptimizePicklesSuccessfullyExperiment()
+    exp = OptimizePicklesSuccessfullyExperiment.get_instance()
     sampler = OptimizingSampler(exp, study)
     dispatcher = LocalDispatcher.make_default(exp, tmp_path)
 

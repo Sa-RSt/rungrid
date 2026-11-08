@@ -174,7 +174,7 @@ class CLI(argparse.ArgumentParser):
                 sched = experiment_class_or_sched
                 experiment = sched.get_experiment()
             else:
-                experiment = experiment_class_or_sched()
+                experiment = experiment_class_or_sched.get_instance()
                 sched = LocalDispatcher.make_default(experiment, args.cache_dir)
             if study_factory is None:
                 source = self._get_source(args)

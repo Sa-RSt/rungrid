@@ -44,7 +44,7 @@ def test_local_dispatcher_caching(tmp_path):
     Ensures that a cacheable step is not called twice with the same arguments,
     while a non-cacheable step is.
     """
-    exp = CachingExperiment()
+    exp = CachingExperiment.get_instance()
     dispatcher = LocalDispatcher.make_default(exp, tmp_path)
 
     v = VarNamespace(set())

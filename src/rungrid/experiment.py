@@ -873,13 +873,19 @@ class Experiment(ABC, Generic[T]):
     abstract (must be overridden) or final (must NOT be overridden).
     """
 
+    __singleton = object()
+
     @final
-    def __init__(self) -> None:
+    def __init__(self, singleton_key: object = None) -> None:
         """Initialize the Experiment and register its step methods.
 
         Automatically inspects class attributes for methods decorated with `@step_method`,
         registering them as ExperimentStep metadata.
         """
+        if singleton_key is not Experiment.__singleton:
+            raise TypeError(
+                f"Experiment subclasses are singleton, use {type(self).__qualname__}.get_instance()"
+            )
         self._steps: dict[str, ExperimentStep] = {}
 
         for val in vars(type(self)).values():
@@ -892,6 +898,13 @@ class Experiment(ABC, Generic[T]):
                     pass
         reg = ExperimentRegistry.get_instance()
         reg.register(self)
+
+    @classmethod
+    @final
+    @lru_cache
+    def get_instance(cls):
+        """Get the singleton instance of this experiment."""
+        return cls(Experiment.__singleton)
 
     @property
     @final
