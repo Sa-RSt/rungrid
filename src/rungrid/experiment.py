@@ -156,6 +156,17 @@ class SamplingStrategy:
         self._name_transformer = None
 
 
+class _GridVariable(TypedDict):
+    name: str
+    choices: int
+    next_choice: int
+
+
+class _GridDataStructure(TypedDict):
+    variables: list[_GridVariable]
+    last_updated_by: str
+    updated_names: list[str]
+
 
 class Sampler:
     """A wrapper around an Optuna trial to suggest and construct sampling strategies.
@@ -192,6 +203,24 @@ class Sampler:
         self._finished = True
         for strat in self._sampling_strategies:
             strat.dispose()
+        st: _GridDataStructure | None = self._optuna_study.user_attrs.get(
+            "rungrid_grid"
+        )
+        if st is not None:
+            if st["last_updated_by"] != self._trial_id:
+                raise StructureError(
+                    "grid() must be called with the same variable names at every sampling; "
+                    + "no grid variables were sampled in this trial"
+                )
+            variable_names = {x["name"] for x in st["variables"]}
+            updated_names = set(st["updated_names"])
+            if variable_names != updated_names:
+                raise StructureError(
+                    "grid() must be called with the same variable names at every sampling; "
+                    + f"grid has variables {variable_names!r} "
+                    + f"but only {updated_names!r} were sampled."
+                )
+
     def get_optuna_trial(self) -> optuna.Trial:
         """Get the underlying optuna trial.
         This method will ask for a trial if none has been asked yet.
@@ -477,7 +506,92 @@ class Sampler:
             f"random({join})", _random_fn, self._variable_names, self._branch_name()
         )
 
+    def grid(self, strategies: Sequence[SamplingStrategy | Any]) -> SamplingStrategy:
+        """Define a sampling strategy that explores all combinations among a generalized table
+        of possible strategies or values.
 
+        Example:
+        def variables(self, v: VarNamespace, s: Sampler) -> None:
+            v.a = s.grid([1, 2, 3])
+            v.b = s.grid([s.random(range(100), 4])
+            v.c = s.grid('abc')
+        the code above may sample, in that order:
+        {'a': 1, 'b': 42, 'c': 'a'}
+        {'a': 2, 'b': 55, 'c': 'a'}
+        {'a': 3, 'b': 2,  'c': 'a'}
+        {'a': 1, 'b': 4,  'c': 'a'}
+        {'a': 2, 'b': 4,  'c': 'a'}
+        {'a': 3, 'b': 4,  'c': 'a'}
+        {'a': 1, 'b': 32, 'c': 'b'}
+        and so on.
+
+        Caveats:
+         - `Sampler.grid` is unaffected by `Sampler.branch`;
+         - Each call to `variables` must call `Sampler.grid` exactly once for each variable
+           (i.e. calling `grid` conditionally isn't allowed), unless `grid` is not called at all
+           (i.e. it's fine if all `grid` calls have the same condition);
+        """
+        _check_not_sampling_strategy("strategies", strategies)
+        if not strategies:
+            raise ValueError("empty collection")
+        strategies_wrapped = [self._maybe_wrap_precomputed(x) for x in strategies]
+        join = "|".join(x.name for x in strategies_wrapped)
+
+        def _grid_fn(name):
+            try:
+                st: _GridDataStructure = self._optuna_study.user_attrs["rungrid_grid"]
+            except KeyError:
+                st: _GridDataStructure = {
+                    "variables": [],
+                    "last_updated_by": "",
+                    "updated_names": [],
+                }
+            try:
+                if st["last_updated_by"] != self._trial_id:
+                    # First time a grid variable is sampled in this trial. Advance
+                    # the mixed-radix counter once per trial, before any variable
+                    # is sampled, so all variables in the trial use the same
+                    # combination. The very first trial starts at the all-zero
+                    # combination instead of advancing it.
+                    if st["last_updated_by"] != "":
+                        self._grid_next(st)
+                    st["updated_names"] = []
+                    st["last_updated_by"] = self._trial_id
+                try:
+                    variable: _GridVariable = next(
+                        x for x in st["variables"] if x["name"] == name
+                    )
+                    if variable["choices"] != len(strategies_wrapped):
+                        raise StructureError(
+                            "the strategies for a given variable name must be a fixed list"
+                        )
+                except StopIteration:
+                    variable: _GridVariable = {
+                        "name": name,
+                        "choices": len(strategies_wrapped),
+                        "next_choice": 0,
+                    }
+                    st["variables"].append(variable)
+                if name in st["updated_names"]:
+                    raise StructureError("called grid twice for the same variable")
+                st["updated_names"].append(name)
+                index = variable["next_choice"]
+                return strategies_wrapped[index].sample(f"{name}_grid{index}")
+            finally:
+                self._optuna_study.set_user_attr("rungrid_grid", st)
+
+        return SamplingStrategy(
+            f"grid({join})", _grid_fn, self._variable_names, lambda x: x
+        )
+
+    def _grid_next(self, st: _GridDataStructure) -> None:
+        for variable in st["variables"]:
+            next_next_choice = variable["next_choice"] + 1
+            if next_next_choice >= variable["choices"]:
+                variable["next_choice"] = 0
+            else:
+                variable["next_choice"] = next_next_choice
+                break
 
     def transformed(
         self,
