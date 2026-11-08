@@ -1,11 +1,11 @@
 """Utilities for generating unique version strings for experiments."""
 
-from collections.abc import Callable
 import datetime
 import inspect
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import NoReturn
 
