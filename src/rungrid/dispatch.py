@@ -270,7 +270,7 @@ def run_step(
         end = datetime.datetime.now()
         tr = TrialResult.make_pruned(e.reason, end)
         return trial.with_result(tr), None, None
-    except Exception as e:
+    except BaseException as e:
         if isinstance(e, tuple(step.recover_from)):
             print(f"Exception ignored in {step!r}:")
             traceback.print_exc()
@@ -283,6 +283,8 @@ def run_step(
                     experiment.steps[record.next_step_name],
                     record.next_step_kwargs or {},
                 )
+        if not isinstance(e, Exception):
+            raise
         end = datetime.datetime.now()
         tr = TrialResult.make_error(e, end)
         return trial.with_result(tr), None, None
