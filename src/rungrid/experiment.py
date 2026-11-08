@@ -412,8 +412,8 @@ class Sampler:
             raise ValueError("quantization interval too large (q >= upper - lower)")
         return SamplingStrategy(
             f"discrete_uniform({lower},{upper})",
-            lambda name: self.get_optuna_trial().suggest_discrete_uniform(
-                name, lower, upper, q
+            lambda name: self.get_optuna_trial().suggest_float(
+                name, lower, upper, step=q
             ),
             self._variable_names,
             self._branch_name(),
