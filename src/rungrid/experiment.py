@@ -16,16 +16,16 @@ from typing import (
     Any,
     Generic,
     NoReturn,
+    TypedDict,
     TypeVar,
     cast,
     final,
 )
 from uuid import UUID
-from weakref import WeakKeyDictionary
+from weakref import WeakKeyDictionary, ref
 
 import optuna
 from optuna.distributions import CategoricalChoiceType
-from typing_extensions import Self
 
 from rungrid.error import StructureError
 from rungrid.warn import rungrid_warn
@@ -71,7 +71,11 @@ class SamplingStrategy:
     """
 
     def __init__(
-        self, name: str, sample_fn: Callable[[str], Any], taken_variable_names: set[str]
+        self,
+        name: str,
+        sample_fn: Callable[[str], Any],
+        taken_variable_names: set[str],
+        name_transformer: Callable[[str], str],
     ) -> None:
         """Initialize the SamplingStrategy.
 
@@ -81,10 +85,14 @@ class SamplingStrategy:
         :type sample_fn: collections.abc.Callable[[str], typing.Any]
         :param taken_variable_names: A set tracking already declared variable names to ensure uniqueness.
         :type taken_variable_names: set[str]
+        :param name_transformer: Must take in a variable name and return another. Will be called before sample_fn
+        to get the actual variable name, like this: sample_fn(name_transformer(name)).
+        :type name_transformer: collections.abc.Callable[[str], str]
         """
         self._name = name
         self._sample_fn = sample_fn
         self._variable_names = taken_variable_names
+        self._name_transformer = name_transformer
 
     @property
     def name(self) -> str:
@@ -96,7 +104,12 @@ class SamplingStrategy:
         return self._name
 
     @classmethod
-    def make_precomputed(cls, value: Any, taken_variable_names: set[str]) -> Self:
+    def make_precomputed(
+        cls,
+        value: Any,
+        taken_variable_names: set[str],
+        name_transformer: Callable[[str], str],
+    ) -> "SamplingStrategy":
         """Create a SamplingStrategy that always yields a precomputed value.
 
         :param value: The constant value to return upon sampling.
@@ -106,7 +119,12 @@ class SamplingStrategy:
         :return: A SamplingStrategy representing a precomputed constant.
         :rtype: SamplingStrategy
         """
-        return cls(f"precomputed({value})", lambda _: value, taken_variable_names)
+        return cls(
+            f"precomputed({value})",
+            lambda _: value,
+            taken_variable_names,
+            name_transformer,
+        )
 
     def sample(self, variable_name: str) -> Any:
         """Sample a value for a specific variable name.
@@ -120,13 +138,13 @@ class SamplingStrategy:
         """
         if variable_name in self._variable_names:
             raise StructureError(f'variable name "{variable_name}" is not unique')
-        self._variable_names.add(variable_name)
-        if self._sample_fn is None:
+        if self._sample_fn is None or self._name_transformer is None:
             raise StructureError(
                 "this sampler has already been disposed; "
                 + "make sure all sampling is done inside the variables() method."
             )
-        res = self._sample_fn(variable_name)
+        res = self._sample_fn(self._name_transformer(variable_name))
+        self._variable_names.add(variable_name)
         return res
 
     def dispose(self) -> None:
@@ -135,6 +153,8 @@ class SamplingStrategy:
         This must be called before pickling.
         """
         self._sample_fn = None
+        self._name_transformer = None
+
 
 
 class Sampler:
@@ -152,11 +172,53 @@ class Sampler:
         """
         self._optuna_trial = optuna_trial
         self._variable_names: set[str] = set()
+        self._branch_stack: list[str] = []
 
     def _maybe_wrap_precomputed(self, s) -> SamplingStrategy:
         if not isinstance(s, SamplingStrategy):
             return self.precomputed(s)
         return s
+
+    def _branch_name(self) -> Callable[[str], str]:
+        stack_copy = self._branch_stack.copy()
+
+        def transform_name(name: str):
+            if not stack_copy:
+                return name
+            return "--".join(itertools.chain(stack_copy, [name]))
+
+        return transform_name
+
+    @contextmanager
+    def branch(self, name: str):
+        """Context manager representing a branch in the parameter search space.
+
+        This makes it so that parameters with the same name can have different
+        distributions, as long as they are in different branches of the search space.
+
+        One example use case is when you have different model architectures with analogous
+        parameters and wish to use a different distribution for each:
+        ```
+        with s.branch(arch):
+            if arch == 'LSTM':
+                v.hidden_size = s.categorical([4, 8, 16])
+            elif arch == 'GRU':
+                v.hidden_size = s.categorical([4, 8, 16, 32])
+        ```
+        Without branching, the code above might fail because the categorical distribution,
+        in general, doesn't support dynamic range in Optuna.
+
+        If the underlying relies on statistical assumptions, it is also helpful to use branches
+        to make sure the priors of two parameters don't get mixed just because they have the same name.
+
+        Branches can be nested.
+
+        :param name: Unique name for the branch.
+        :type name: str
+        """
+        self._branch_stack.append(name)
+        yield
+        assert self._branch_stack.pop() == name
 
     def precomputed(self, k: Any) -> SamplingStrategy:
         """Create a precomputed sampling strategy returning a constant value.
@@ -166,7 +228,9 @@ class Sampler:
         :return: A SamplingStrategy yielding the constant.
         :rtype: SamplingStrategy
         """
-        return SamplingStrategy.make_precomputed(k, self._variable_names)
+        return SamplingStrategy.make_precomputed(
+            k, self._variable_names, self._branch_name()
+        )
 
     def integer(self, lower: int, upper: int) -> SamplingStrategy:
         """Define an integer sampling strategy within a range.
@@ -210,8 +274,9 @@ class Sampler:
         _check_range(lower, upper)
         return SamplingStrategy(
             f"uniform({lower},{upper})",
-            lambda name: self._optuna_trial.suggest_float(name, lower, upper),
+            lambda name: self.get_optuna_trial().suggest_float(name, lower, upper),
             self._variable_names,
+            self._branch_name(),
         )
 
     def log_uniform(self, lower: float, upper: float) -> SamplingStrategy:
@@ -233,8 +298,11 @@ class Sampler:
         _check_range(lower, upper)
         return SamplingStrategy(
             f"log_uniform({lower},{upper})",
-            lambda name: self._optuna_trial.suggest_float(name, lower, upper, log=True),
+            lambda name: self.get_optuna_trial().suggest_float(
+                name, lower, upper, log=True
+            ),
             self._variable_names,
+            self._branch_name(),
         )
 
     def discrete_uniform(
@@ -262,10 +330,11 @@ class Sampler:
             raise ValueError("quantization interval too large (q >= upper - lower)")
         return SamplingStrategy(
             f"discrete_uniform({lower},{upper})",
-            lambda name: self._optuna_trial.suggest_discrete_uniform(
+            lambda name: self.get_optuna_trial().suggest_discrete_uniform(
                 name, lower, upper, q
             ),
             self._variable_names,
+            self._branch_name(),
         )
 
     def categorical(
@@ -278,23 +347,58 @@ class Sampler:
         :return: A categorical SamplingStrategy.
         :rtype: SamplingStrategy
         :raises TypeError: If any option in categories is itself a SamplingStrategy.
+        :raises ValueError: If categories is an empty collection.
         """
         _check_not_sampling_strategy("categories", categories)
         for i in range(len(categories)):
             _check_not_sampling_strategy(f"categories[{i}]", categories[i])
+        if not categories:
+            raise ValueError("empty collection")
         join = ",".join(str(x) for x in categories)
         return SamplingStrategy(
             f"categorical({join})",
-            lambda name: self._optuna_trial.suggest_categorical(name, categories),
+            lambda name: self.get_optuna_trial().suggest_categorical(name, categories),
             self._variable_names,
+            self._branch_name(),
         )
+
+    def ordinal(self, categories: Sequence[CategoricalChoiceType]) -> SamplingStrategy:
+        """Define a categorical choice sampling strategy for which there is an order between categories,
+        i.e. some are greater than others.
+
+        :param categories: An ordered sequence of categories to sample from.
+        :type categories: collections.abc.Sequence[optuna.distributions.CategoricalChoiceType]
+        :return: A categorical SamplingStrategy.
+        :rtype: SamplingStrategy
+        :raises TypeError: If any option in categories is itself a SamplingStrategy.
+        :raises ValueError: If categories is an empty collection.
+        """
+        categories = list(categories)
+        _check_not_sampling_strategy("categories", categories)
+        for i in range(len(categories)):
+            _check_not_sampling_strategy(f"categories[{i}]", categories[i])
+        if not categories:
+            raise ValueError("empty collection")
+        join = ",".join(str(x) for x in categories)
+        return SamplingStrategy(
+            f"ordinal({join})",
+            lambda name: categories[
+                self.get_optuna_trial().suggest_int(name, 0, len(categories) - 1)
+            ],
+            self._variable_names,
+            self._branch_name(),
+        )
+
+    def boolean(self) -> SamplingStrategy:
+        """Convenience equivalent of `Sampler.categorical([True, False])`."""
+        return self.categorical([True, False])
 
     def random(
         self,
         strategies: Sequence[SamplingStrategy | Any],
         rng: random.Random | None = None,
     ) -> SamplingStrategy:
-        """Define a sampling strategy that randomly delegates to one of multiple strategies.
+        """Define a sampling strategy that randomly delegates to one of multiple strategies or values.
 
         :param strategies: A sequence of strategies or raw values to choose from randomly.
         :type strategies: collections.abc.Sequence[SamplingStrategy | typing.Any]
@@ -314,9 +418,13 @@ class Sampler:
 
         def _random_fn(name):
             index = rng.randrange(len(strategies_wrapped))
-            return strategies_wrapped[index].sample(f"{name}_R{index}")
+            return strategies_wrapped[index].sample(f"{name}_random{index}")
 
-        return SamplingStrategy(f"random({join})", _random_fn, self._variable_names)
+        return SamplingStrategy(
+            f"random({join})", _random_fn, self._variable_names, self._branch_name()
+        )
+
+
 
     def transformed(
         self,
@@ -347,6 +455,7 @@ class Sampler:
             ss.name + f"/transformed({alt_name})",
             lambda name: trans(ss.sample(name)),
             self._variable_names,
+            self._branch_name(),
         )
 
     def list(self, ss: SamplingStrategy | Any, length: int) -> SamplingStrategy:
@@ -368,6 +477,7 @@ class Sampler:
             ss.name + f"/list({length})",
             lambda name: [ss.sample(name + f"_L{i}") for i in range(length)],
             self._variable_names,
+            self._branch_name(),
         )
 
     def list_transformed(
@@ -402,6 +512,7 @@ class Sampler:
             ss.name + f"/list_transformed({alt_name}:{length})",
             lambda name: [trans(i, ss.sample(name)) for i in range(length)],
             self._variable_names,
+            self._branch_name(),
         )
 
 
@@ -447,7 +558,9 @@ class VarNamespace:
         elif isinstance(value, SamplingStrategy):
             self._sampled(name, value)
         else:
-            ss = SamplingStrategy.make_precomputed(value, self._variable_names)
+            ss = SamplingStrategy.make_precomputed(
+                value, self._variable_names, lambda x: x
+            )
             self._sampled(name, ss)
 
     def _set_variable(self, name: str, value: Any, /) -> None:
@@ -615,7 +728,7 @@ class TrialResult:
     end: datetime
 
     @classmethod
-    def make_error(cls, error: Any, end: datetime) -> Self:
+    def make_error(cls, error: Any, end: datetime) -> "TrialResult":
         """Create a failed TrialResult containing an error.
 
         :param error: The exception or error object.
@@ -628,7 +741,7 @@ class TrialResult:
         return cls(None, error, None, True, False, end)
 
     @classmethod
-    def make_pruned(cls, reason: str, end: datetime) -> Self:
+    def make_pruned(cls, reason: str, end: datetime) -> "TrialResult":
         """Create a pruned TrialResult containing a prune reason.
 
         :param reason: The reason why the trial was pruned.
@@ -641,7 +754,7 @@ class TrialResult:
         return cls(None, None, reason, False, True, end)
 
     @classmethod
-    def make_ok(cls, result: Any, end: datetime) -> Self:
+    def make_ok(cls, result: Any, end: datetime) -> "TrialResult":
         """Create a successful TrialResult containing the output value.
 
         :param result: The successful return value.
@@ -730,11 +843,36 @@ def step_method(
         )
 
         @functools.wraps(fn)
-        def _guarded(self: Experiment, *args, **kwargs):
+        def _guarded(self: Experiment, trial: Trial, *args, **kwargs):
             self._disallow_step_call()
-            return fn(self, *args, **kwargs)
+            return fn(self, trial, *args, **kwargs)
 
         return _guarded
+
+    return decorator
+
+
+def fixture(*, max_size: int = 128) -> Callable[[T], T]:
+    """A `functools.lru_cache` wrapper for methods on Experiment subclasses that doesn't leak memory."""
+
+    def decorator(fn: T) -> T:
+        tp = thread_local()
+        cfn = cast(Callable, fn)
+        sig = inspect.signature(cfn)
+        if "self" not in sig.parameters:
+            raise StructureError('fixtures must have an argument called "self"')
+
+        @lru_cache(maxsize=max_size)
+        def cacher(*args, **kwargs):
+            return cfn(tp.self(), *args, **kwargs)
+
+        @functools.wraps(cfn)
+        def _decorated(self: Experiment, *args, **kwargs):
+            r = ref(self)
+            tp.self = r
+            return cacher(*args, **kwargs)
+
+        return cast(T, _decorated)
 
     return decorator
 
@@ -1116,7 +1254,7 @@ class Trial(ABC):
 
     def __init__(
         self,
-        optuna_trial_number: int,
+        optuna_trial_number: int | None,
         uuid: UUID,
         v: VarNamespace,
         step_records: list[StepRecord] = [],
@@ -1187,7 +1325,7 @@ class Trial(ABC):
         return self._result
 
     @property
-    def optuna_trial_number(self) -> int:
+    def optuna_trial_number(self) -> int | None:
         """Get the trial index assigned by Optuna.
 
         :return: The trial number.

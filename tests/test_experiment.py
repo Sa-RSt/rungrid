@@ -73,7 +73,7 @@ def test_varnamespace_assign_sampling_strategy_raises_structure_error():
     from rungrid.experiment import SamplingStrategy
 
     v = VarNamespace(set())
-    ss = SamplingStrategy("dummy", lambda name: 42, set())
+    ss = SamplingStrategy("dummy", lambda name: 42, set(), lambda x: x)
     v.x = ss
     assert v.x == 42
 
@@ -85,7 +85,7 @@ def test_varnamespace_duplicate_sampling_raises_structure_error():
     from rungrid.experiment import SamplingStrategy
 
     names = {"x"}
-    ss = SamplingStrategy("dummy", lambda name: 42, names)
+    ss = SamplingStrategy("dummy", lambda name: 42, names, lambda x: x)
     with pytest.raises(StructureError, match='variable name "x" is not unique'):
         ss.sample("x")
 
@@ -96,7 +96,7 @@ def test_varnamespace_set_variable_sampling_strategy_raises_value_error():
     from rungrid.experiment import SamplingStrategy
 
     v = VarNamespace(set())
-    ss = SamplingStrategy("dummy", lambda name: 42, set())
+    ss = SamplingStrategy("dummy", lambda name: 42, set(), lambda x: x)
     v._set_variable("x", ss)
 
 
