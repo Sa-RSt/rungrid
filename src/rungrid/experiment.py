@@ -998,6 +998,18 @@ def step_method(
                 raise StructureError(
                     f'step_methods are required to have an argument called "{name}"'
                 )
+        if first:
+            extra = {
+                name
+                for name, parameter in sig.parameters.items()
+                if name not in {"self", "trial"}
+                and parameter.kind is not inspect.Parameter.VAR_KEYWORD
+            }
+            if extra:
+                raise StructureError(
+                    f"step_method: {fn.__qualname__}: the first step must only accept "
+                    + f'"self" and "trial" arguments, got extra arguments {sorted(extra)!r}'
+                )
         arg_names.discard("self")
         arg_names.discard("trial")
         fqn = _get_fqn(fn)

@@ -46,6 +46,10 @@ class DoneExperiment(Experiment):
         pass
 
     @step_method(first=True)
+    def step_start(self, trial):
+        return None
+
+    @step_method()
     def step_done(self, trial, value):
         return value * 2
 
@@ -60,6 +64,10 @@ class ChainExperiment(Experiment):
         pass
 
     @step_method(first=True)
+    def step_start(self, trial):
+        return None
+
+    @step_method()
     def step_first(self, trial, value):
         self.exit_next_step(self.step_second, doubled=value * 2)
 
@@ -151,7 +159,11 @@ class RecoverExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         pass
 
-    @step_method(first=True, recover_from=[ValueError])
+    @step_method(first=True)
+    def step_start(self, trial):
+        return None
+
+    @step_method(recover_from=[ValueError])
     def step_recover(self, trial, flag):
         if flag:
             raise ValueError("recover me")
@@ -171,7 +183,11 @@ class CacheChainExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         pass
 
-    @step_method(cache=True, first=True)
+    @step_method(first=True)
+    def step_start(self, trial):
+        return None
+
+    @step_method(cache=True)
     def step_cached_first(self, trial, value):
         self.exit_next_step(self.step_cached_second, result=value + 10)
 

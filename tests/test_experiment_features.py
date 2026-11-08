@@ -65,7 +65,7 @@ class BasicExperiment(Experiment):
         v.x = s.precomputed(1)
 
     @step_method(first=True)
-    def step_one(self, trial, keep, drop):
+    def step_one(self, trial):
         return "one"
 
     @step_method()
@@ -83,6 +83,10 @@ class AnnotatedStepExperiment(Experiment):
         pass
 
     @step_method(first=True)
+    def step_start(self, trial):
+        return None
+
+    @step_method()
     def step_annotated(
         self,
         trial,
@@ -243,7 +247,7 @@ def test_step_method_warns_about_default_arguments():
             def variables(self, v, s) -> None:
                 pass
 
-            @step_method(first=True)
+            @step_method()
             def step_default(self, trial, foo=1):
                 return foo
 
@@ -601,3 +605,103 @@ def test_live_trial_wraps_optuna_trial():
     assert trial.uuid == uuid
     assert trial.optuna_trial_number == optuna_trial.number
     assert trial.v.x == 1
+
+
+# ---------------------------------------------------------------------------
+# First-step signature validation
+# ---------------------------------------------------------------------------
+
+
+def test_first_step_with_only_self_and_trial_is_accepted():
+    exp = BasicExperiment.get_instance()
+    step = exp.get_first_step()
+
+    assert step.arg_names == set()
+
+
+def test_first_step_allows_var_keyword_arguments():
+    class KwargsFirstExperiment(Experiment):
+        def version(self) -> str:
+            return "first-kwargs"
+
+        def variables(self, v, s) -> None:
+            pass
+
+        @step_method(first=True)
+        def step_start(self, trial, **kwargs):
+            return None
+
+    assert KwargsFirstExperiment.get_instance().get_first_step() is not None
+
+
+def test_first_step_rejects_extra_positional_argument():
+    with pytest.raises(
+        StructureError, match="first step must only accept .*self.* and .*trial"
+    ):
+
+        class ExtraArgumentExperiment(Experiment):
+            def version(self) -> str:
+                return "first-extra"
+
+            def variables(self, v, s) -> None:
+                pass
+
+            @step_method(first=True)
+            def step_start(self, trial, extra):
+                return None
+
+
+def test_first_step_rejects_extra_argument_with_default():
+    with pytest.warns(UserWarning), pytest.raises(
+        StructureError, match="first step must only accept"
+    ):
+
+        class DefaultArgumentFirstExperiment(Experiment):
+            def version(self) -> str:
+                return "first-default"
+
+            def variables(self, v, s) -> None:
+                pass
+
+            @step_method(first=True)
+            def step_start(self, trial, extra=1):
+                return None
+
+
+def test_first_step_rejects_keyword_only_argument():
+    with pytest.warns(UserWarning), pytest.raises(
+        StructureError, match="first step must only accept"
+    ):
+
+        class KeywordOnlyFirstExperiment(Experiment):
+            def version(self) -> str:
+                return "first-keyword-only"
+
+            def variables(self, v, s) -> None:
+                pass
+
+            @step_method(first=True)
+            def step_start(self, trial, *, extra=1):
+                return None
+
+
+def test_first_step_rejects_var_positional_argument():
+    with pytest.raises(StructureError, match="first step must only accept"):
+
+        class VarPositionalFirstExperiment(Experiment):
+            def version(self) -> str:
+                return "first-var-positional"
+
+            def variables(self, v, s) -> None:
+                pass
+
+            @step_method(first=True)
+            def step_start(self, trial, *args):
+                return None
+
+
+def test_non_first_step_may_still_declare_extra_arguments():
+    exp = BasicExperiment.get_instance()
+    step = next(s for s in exp.steps.values() if s.name.endswith("step_two"))
+
+    assert step.arg_names == {"keep"}
