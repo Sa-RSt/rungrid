@@ -63,10 +63,10 @@ class OptimizingSampler(Source, Sink):
         :return: An iterable of newly suggested trial instances.
         :rtype: collections.abc.Iterable[Trial]
         """
-        trial_uuid = uuid4()
         if finished or search_tag is not None:
             return
         while 1:
+            trial_uuid = uuid4()
             s = Sampler(trial_uuid, self._study)
             v = s._make_var_namespace()
             self._sampler(v, s)
