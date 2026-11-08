@@ -57,8 +57,10 @@ def _lock(sar: SupportsAcquireRelease):
     while not sar.acquire():
         time.sleep(wait)
         wait *= 2
-    yield
-    sar.release()
+    try:
+        yield
+    finally:
+        sar.release()
 
 
 class BucketFileStorage(Sink, Source):
