@@ -344,7 +344,9 @@ class CSVSink(Sink):
         return repr(list(trial.trace_all(key)))
 
     def _jsonize(self, x: Any) -> dict | list | str | int | float | bool | None:
-        if isinstance(x, numbers.Integral):
+        if isinstance(x, bool):
+            return bool(x)
+        elif isinstance(x, numbers.Integral):
             return int(x)
         elif isinstance(x, FLOAT_TYPES):
             return float(x)
@@ -358,8 +360,6 @@ class CSVSink(Sink):
             return x.decode("utf-8")
         elif x is None:
             return None
-        elif isinstance(x, bool):
-            return bool(x)
         return repr(x)
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
