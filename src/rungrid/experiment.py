@@ -2,9 +2,11 @@
 
 import functools
 import inspect
+import itertools
 import random
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
@@ -15,6 +17,7 @@ from typing import (
     Generic,
     NoReturn,
     TypeVar,
+    cast,
     final,
 )
 from uuid import UUID
@@ -518,6 +521,7 @@ class ExperimentStep:
 
     name: str
     cacheable: bool
+    first: bool
     recover_from: list[type[BaseException]]
     drop_args: set[str]
     experiment_ident: str
@@ -561,6 +565,7 @@ class ExperimentStep:
 class _ExperimentStepBuilder:
     name: str
     cacheable: bool
+    first: bool
     fn: Callable
     recover_from: list[type[BaseException]]
     drop_args: set[str]
@@ -571,6 +576,7 @@ class _ExperimentStepBuilder:
         return ExperimentStep(
             name=self.name,
             cacheable=self.cacheable,
+            first=self.first,
             fn=bound_fn,
             recover_from=self.recover_from,
             drop_args=self.drop_args,
@@ -656,7 +662,7 @@ class TrialResult:
         return not self.is_error and not self.is_pruned
 
 
-_fqn_to_step_builder: dict[str, _ExperimentStepBuilder] = dict()
+_fqn_to_step_builder: dict[str, _ExperimentStepBuilder] = {}
 
 
 def _get_fqn(fn: Callable) -> str:
@@ -666,12 +672,15 @@ def _get_fqn(fn: Callable) -> str:
 def step_method(
     *,
     cache: bool = False,
+    first: bool = False,
     recover_from: Iterable[type[BaseException]] = [KeyboardInterrupt],
 ):
     """Decorate a method of an Experiment subclass as an experiment step.
 
     :param cache: Whether the step result is cacheable.
     :type cache: bool
+    :param first: Whether this is the first step of the experiment.
+    :type first: bool
     :param recover_from: Exceptions to ignore/recover from during this step.
     :type recover_from: collections.abc.Iterable[type[BaseException]]
     :param drop_args: Argument names to drop before passing to the next step.
@@ -713,6 +722,7 @@ def step_method(
         _fqn_to_step_builder[fqn] = _ExperimentStepBuilder(
             name=fqn,
             cacheable=cache,
+            first=first,
             fn=fn,
             recover_from=list(recover_from),
             drop_args=drop_args,
@@ -796,7 +806,7 @@ class ExperimentRegistry:
         """Initialize the ExperimentRegistry."""
         self._experiments_by_name: dict[str, Experiment] = {}
         self._experiments_by_ident: dict[str, Experiment] = {}
-        self._thread_locals: WeakKeyDictionary[Experiment, thread_local] = (
+        self._auxiliary_data: WeakKeyDictionary[Experiment, dict[str, Any]] = (
             WeakKeyDictionary()
         )
 
@@ -854,12 +864,30 @@ class ExperimentRegistry:
         :return: A threading.local instance
         :rtype: threading.local
         """
+        aux = self.get_auxiliary_data(exp)
         try:
-            return self._thread_locals[exp]
+            return aux["_tp"]
         except KeyError:
             tp = thread_local()
-            self._thread_locals[exp] = tp
+            aux["_tp"] = tp
             return tp
+
+    def get_auxiliary_data(self, exp: "Experiment") -> dict[str, Any]:
+        """Get auxiliary variables associated with an experiment.
+
+        This is important for associating unserializable objects with an experiment.
+
+        :param exp: The Experiment object
+        :type exp: Experiment
+        :return: A dictionary with arbitrary auxiliary data.
+        :rtype: dict[str, Any]
+        """
+        try:
+            return self._auxiliary_data[exp]
+        except KeyError:
+            aux = {}
+            self._auxiliary_data[exp] = aux
+            return aux
 
 
 class Experiment(ABC, Generic[T]):
@@ -887,15 +915,31 @@ class Experiment(ABC, Generic[T]):
                 f"Experiment subclasses are singleton, use {type(self).__qualname__}.get_instance()"
             )
         self._steps: dict[str, ExperimentStep] = {}
+        first_step: ExperimentStep | None = None
 
         for val in vars(type(self)).values():
             if callable(val):
                 fqn = _get_fqn(val)
                 try:
                     sb = _fqn_to_step_builder[fqn]
-                    self._steps[fqn] = sb.build(self)
+                    step = sb.build(self)
+                    if step.first:
+                        if first_step is None:
+                            first_step = step
+                        else:
+                            raise StructureError(
+                                f"experiment {type(self).__qualname__!r} has more than one first step: {first_step.name}, {step.name}"
+                            )
+                    self._steps[fqn] = step
                 except KeyError:
                     pass
+
+        if first_step is None:
+            raise StructureError(
+                f"experiment {type(self).__qualname__!r} has zero first steps; create one by using @step_method(first=True)"
+            )
+        self._first_step: ExperimentStep = first_step
+
         reg = ExperimentRegistry.get_instance()
         reg.register(self)
 
@@ -955,17 +999,6 @@ class Experiment(ABC, Generic[T]):
         """
         pass
 
-    @abstractmethod
-    def first_step(self) -> Callable:
-        """Specify the initial step function of the experiment.
-
-        Must be implemented by subclasses.
-
-        :return: A callable corresponding to the first step of the experiment.
-        :rtype: collections.abc.Callable
-        """
-        pass
-
     @final
     def _step_from_fn(self, fn: Callable) -> ExperimentStep:
         for _, step in self._steps.items():
@@ -1007,8 +1040,9 @@ class Experiment(ABC, Generic[T]):
         tp.allow_step_call = True
 
     @final
-    def _get_first_step(self) -> ExperimentStep:
-        return self._step_from_fn(self.first_step())
+    def get_first_step(self) -> ExperimentStep:
+        """Get the first step of this experiment."""
+        return self._first_step
 
     @property
     @final

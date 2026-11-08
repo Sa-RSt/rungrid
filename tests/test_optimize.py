@@ -1,7 +1,10 @@
 import datetime
+import itertools
+import pickle
 
 import optuna
 
+from rungrid.dispatch import LocalDispatcher
 from rungrid.experiment import (
     Experiment,
     TrialResult,
@@ -11,28 +14,49 @@ from rungrid.experiment import (
 from rungrid.optimize import OptimizingSampler
 
 
-class OptimizeDummyExperiment(Experiment):
+class OptimizeExperimentWithoutOptunaVariables(Experiment):
     """A dummy experiment class for testing."""
 
     def version(self) -> str:
-        return "1.0-dummy"
+        return "1.0-without"
 
     def variables(self, v: VarNamespace, s) -> None:
         v.param1 = s.precomputed(123)
 
-    def first_step(self):
-        return self.step_start
-
-    @step_method(cache=True)
+    @step_method(cache=True, first=True)
     def step_start(self, trial, **kwargs):
         return "step_start_result"
+
+
+class OptimizeExperimentWithOptunaVariables(Experiment):
+    """A dummy experiment class for testing."""
+
+    def version(self) -> str:
+        return "1.0-with"
+
+    def variables(self, v: VarNamespace, s) -> None:
+        v.param1 = s.integer(123, 456)
+
+    @step_method(cache=True, first=True)
+    def step_start(self, trial, **kwargs):
+        return "step_start_result"
+
+
+def test_optimizing_sampler_doesnt_create_optuna_trial_if_unnecessary():
+    study = optuna.create_study(direction="minimize")
+    exp = OptimizeExperimentWithoutOptunaVariables.get_instance()
+    s = OptimizingSampler(exp, study)
+    trial = next(iter(s.get_trials()))
+    assert trial is not None
+    assert trial.is_finished() is False
+    assert trial.optuna_trial_number is None
 
 
 def test_optimizing_sampler():
     """Verify that OptimizingSampler yields trials from Optuna and reports back results."""
     # Create an in-memory Optuna study
     study = optuna.create_study(direction="minimize")
-    exp = OptimizeDummyExperiment()
+    exp = OptimizeExperimentWithOptunaVariables.get_instance()
 
     sampler = OptimizingSampler(exp, study)
 
@@ -70,10 +94,6 @@ def test_optimizing_sampler():
 
 def test_optimize_pipeline(tmp_path):
     """Verify the entire pipeline of declaring variables in variables() and accessing them in step functions during dispatch."""
-    import itertools
-    import optuna
-    from rungrid.optimize import OptimizingSampler
-    from rungrid.dispatch import LocalDispatcher
 
     # Keep track of accessed variable values inside the step
     accessed_values = []
@@ -87,10 +107,7 @@ def test_optimize_pipeline(tmp_path):
             v.val1 = s.uniform(10.0, 20.0)
             v.val2 = s.precomputed("const_val")
 
-        def first_step(self):
-            return self.step_one
-
-        @step_method()
+        @step_method(first=True)
         def step_one(self, trial, **kwargs):
             # Access variables from trial
             accessed_values.append(trial.v.val1)
@@ -117,11 +134,6 @@ def test_optimize_pipeline(tmp_path):
 
 def test_sampling_strategy_pickles_successfully(tmp_path):
     """Ensure SamplingStrategy objects are disposed"""
-    import itertools
-    import optuna
-    import pickle
-    from rungrid.optimize import OptimizingSampler
-    from rungrid.dispatch import LocalDispatcher
 
     # Keep track of accessed variable values inside the step
     vns = []
@@ -137,10 +149,7 @@ def test_sampling_strategy_pickles_successfully(tmp_path):
             v.vec = s.list(s.uniform(-1.0, 1.0), 32)
             vns.append(v)
 
-        def first_step(self):
-            return self.step_one
-
-        @step_method()
+        @step_method(first=True)
         def step_one(self, trial, **kwargs):
             return "done"
 

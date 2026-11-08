@@ -24,10 +24,7 @@ class CachingExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         v.p = 42
 
-    def first_step(self):
-        return self.step_cacheable
-
-    @step_method(cache=True)
+    @step_method(cache=True, first=True)
     def step_cacheable(self, trial, **kwargs):
         EXECUTION_COUNTS["cacheable"] += 1
         return f"cacheable-result-{kwargs.get('arg', '')}"
@@ -96,6 +93,7 @@ def test_dispatch_structure_errors():
     dummy_step = ExperimentStep(
         name="dummy_nonexistent",
         cacheable=True,
+        first=False,
         recover_from=[],
         drop_args=set(),
         experiment_ident="nonexistent-ident",

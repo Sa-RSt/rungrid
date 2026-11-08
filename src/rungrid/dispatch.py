@@ -134,7 +134,7 @@ class LocalDispatcher(Scheduler):
         """
         recovery = self._recover_last_step_kwargs(trial)
         if recovery is None:
-            current_step = self._experiment._get_first_step()
+            current_step = self._experiment.get_first_step()
             kwargs = {}
         else:
             current_step, kwargs = recovery

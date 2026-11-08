@@ -31,10 +31,7 @@ class CliDummyExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         v.param1= s.precomputed(456)
 
-    def first_step(self):
-        return self.step_start
-
-    @step_method()
+    @step_method(first=True)
     def step_start(self, trial, **kwargs):
         return "cli-done"
 
@@ -146,10 +143,7 @@ class OptunaCliExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         v.val= s.uniform(0.0, 10.0)
 
-    def first_step(self):
-        return self.step_one
-
-    @step_method()
+    @step_method(first=True)
     def step_one(self, trial, **kwargs):
         return 4.5
 """
@@ -202,10 +196,7 @@ class SchedCliExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         v.x = 1
 
-    def first_step(self):
-        return self.step_one
-
-    @step_method()
+    @step_method(first=True)
     def step_one(self, trial, **kwargs):
         return "done"
 
@@ -243,10 +234,7 @@ class JobsMultipleCliExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         v.x = 1
 
-    def first_step(self):
-        return self.step_one
-
-    @step_method()
+    @step_method(first=True)
     def step_one(self, trial, **kwargs):
         return "done"
 
@@ -289,10 +277,7 @@ class JobsOneCliExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         v.x = 1
 
-    def first_step(self):
-        return self.step_one
-
-    @step_method()
+    @step_method(first=True)
     def step_one(self, trial, **kwargs):
         return "done"
 
@@ -370,10 +355,7 @@ class OptionsExp(Experiment):
     def variables(self, v, s) -> None:
         v.x = 1
 
-    def first_step(self):
-        return self.step_one
-
-    @step_method()
+    @step_method(first=True)
     def step_one(self, trial, **kwargs):
         return "done"
 """

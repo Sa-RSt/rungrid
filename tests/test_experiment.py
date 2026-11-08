@@ -21,10 +21,7 @@ class DummyExperiment(Experiment):
     def variables(self, v: VarNamespace, s) -> None:
         v.param1 = s.precomputed(123)
 
-    def first_step(self):
-        return self.step_start
-
-    @step_method(cache=True)
+    @step_method(cache=True, first=True)
     def step_start(self, trial, **kwargs):
         return "step_start_result"
 
@@ -114,10 +111,7 @@ def test_experiment_step_from_fn_unregistered_raises_lookup_error():
         def variables(self, v, s) -> None:
             pass
 
-        def first_step(self):
-            return self.step_none
-
-        @step_method()
+        @step_method(first=True)
         def step_none(self, trial, **kwargs):
             return 42
 
@@ -134,10 +128,7 @@ def test_unallowed_step_method_call_raises_runtime_error():
         def variables(self, v, s) -> None:
             pass
 
-        def first_step(self):
-            return self.my_step
-
-        @step_method()
+        @step_method(first=True)
         def my_step(self, trial, **kwargs):
             self.other_step(trial)
             assert isinstance(self, Experiment)
