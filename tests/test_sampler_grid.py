@@ -514,6 +514,20 @@ def test_grid_dispose_is_idempotent():
     s.dispose()  # Must not raise a second time.
 
 
+def test_grid_dispose_raises_again_after_a_structure_error():
+    study = make_study()
+    sample_trial(study, {"a": [1, 2], "b": [3, 4]})
+
+    s = Sampler(uuid4(), study)
+    v = s._make_var_namespace()
+    v.a = s.grid([1, 2])
+
+    with pytest.raises(StructureError, match="same variable names"):
+        s.dispose()
+    with pytest.raises(StructureError, match="same variable names"):
+        s.dispose()
+
+
 def test_grid_dispose_without_grid_does_not_raise():
     study = make_study()
     s = Sampler(uuid4(), study)

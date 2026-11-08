@@ -200,7 +200,6 @@ class Sampler:
         """Clean up method to be called after sampling and before the trial begins."""
         if self._finished:
             return
-        self._finished = True
         for strat in self._sampling_strategies:
             strat.dispose()
         st: _GridDataStructure | None = self._optuna_study.user_attrs.get(
@@ -220,6 +219,7 @@ class Sampler:
                     + f"grid has variables {variable_names!r} "
                     + f"but only {updated_names!r} were sampled."
                 )
+        self._finished = True
 
     def get_optuna_trial(self) -> optuna.Trial:
         """Get the underlying optuna trial.
