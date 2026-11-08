@@ -4,13 +4,14 @@ import importlib.util
 import pickle
 import random
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from io import BytesIO
-from typing import IO, Any, Literal, Sequence, TypeVar
+from typing import IO, Any, Literal, TypeVar
+from uuid import uuid4
 
 import joblib
 
-from rungrid.experiment import StaleTrial, StepRecord, Trial
+from rungrid.experiment import StaleTrial, StepRecord, Trial, VarNamespace
 
 PredicateType = Callable[[Trial], bool]
 T = TypeVar("T")

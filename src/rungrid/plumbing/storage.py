@@ -1,17 +1,22 @@
 """Storage systems and export sinks for recording experimental trials on disk."""
 
 import csv
+import json
+import numbers
 import os
 import re
+import sys
 import time
-from collections.abc import Callable, Iterable
+import traceback
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
-from typing import IO, Literal, Protocol, Sequence
+from typing import IO, Any, Literal, Protocol
 
+import numpy
 from optuna.storages.journal import JournalFileOpenLock
 
 from rungrid.experiment import StaleTrial, Trial
@@ -23,6 +28,12 @@ _STRIP_PATH_CHARS = re.compile(r"[^a-zA-Z0-9_.-]")
 
 LOCK_FILE_SUFFIX = ".lock"
 RENAME_FILE_SUFFIX = ".rename"
+NUMPY_REAL_TYPES = tuple(
+    v
+    for k, v in vars(numpy).items()
+    if k.startswith(("float", "int", "complex")) and isinstance(v, type)
+)
+FLOAT_TYPES = tuple(list(NUMPY_REAL_TYPES) + [numbers.Rational, numbers.Real])
 
 
 class SupportsAcquireRelease(Protocol):
@@ -38,7 +49,6 @@ class SupportsAcquireRelease(Protocol):
 
     def release(self) -> None:
         """Release the lock."""
-        pass
 
 
 @contextmanager
@@ -62,6 +72,7 @@ class BucketFileStorage(Sink, Source):
         self,
         finished_dir: os.PathLike,
         unfinished_dir: os.PathLike,
+        uuid_prefix_length: int = 2,
         serializing_backend: Literal["torch", "pickle", "joblib", "default"]
         | LoaderDumper = "default",
         lock_factory: Callable[[str], "SupportsAcquireRelease"] = JournalFileOpenLock,
@@ -72,6 +83,12 @@ class BucketFileStorage(Sink, Source):
         :type finished_dir: os.PathLike
         :param unfinished_dir: Directory path where unfinished trials are stored.
         :type unfinished_dir: os.PathLike
+        :param uuid_prefix_length: How many characters of the trial UUIDs to use
+        for file names. This sets a hard limit on the number of buckets (files) per
+        directory to 16**uuid_prefix_length, where "**" is the power operator. The default
+        is 2, so that the limit is 256, which is friendly toward some filesystems that may
+        silently not support a large number of files in a single directory.
+        :type uuid_prefix_length: int
         :param serializing_backend: The serialization backend to use.
         :type serializing_backend: Literal["torch", "pickle", "joblib", "default"] | LoaderDumper
         :param lock_factory: A callable that provides file locking primitives.
@@ -81,6 +98,7 @@ class BucketFileStorage(Sink, Source):
         super().__init__()
         self._finished_dir = Path(finished_dir)
         self._unfinished_dir = Path(unfinished_dir)
+        self._uuid_prefix_length = uuid_prefix_length
         self._finished_dir.mkdir(parents=True, exist_ok=True)
         self._unfinished_dir.mkdir(parents=True, exist_ok=True)
         self._lock_factory = lock_factory
@@ -119,7 +137,8 @@ class BucketFileStorage(Sink, Source):
         concat = ".".join(sorted(trial.tags)) or "untagged"
         mangle = self._tag_mangle(concat)
         dir_name = base_dir / mangle
-        return (dir_name / str(trial.uuid)[:4]).with_suffix(".bin")
+        file_name = str(trial.uuid).replace("-", "")[: self._uuid_prefix_length]
+        return (dir_name / file_name).with_suffix(".bin")
 
     def _bucket_lock(self, bucket: Path):
         bucket.parent.mkdir(parents=True, exist_ok=True)
@@ -129,33 +148,50 @@ class BucketFileStorage(Sink, Source):
         with self._bucket_lock(bucket):
             if not bucket.is_file():
                 return []
-            with open(bucket, "r+b") as f:
-                return self._ld.load(f)
+            try:
+                with open(bucket, "r+b") as f:
+                    return self._ld.load(f)
+            except Exception:
+                print("ignoring corrupted bucket", bucket, file=sys.stderr)
+                traceback.print_exc()
+                return []
 
     def _prefetch_bucket(self, bucket: Path) -> Future[list[StaleTrial]]:
         return self._io_workers.submit(self._read_bucket, bucket)
 
     def _prefetching_bucket_iter(
-        self, buckets: Iterable[Path]
+        self, buckets: Path | Iterable[Path]
     ) -> Iterable[list[StaleTrial]]:
+        if isinstance(buckets, Path):
+            buckets = self._bucket_iter(buckets)
         iterator = iter(buckets)
         try:
             first_bucket = next(iterator)
         except StopIteration:
             return
         future = self._prefetch_bucket(first_bucket)
+        future_bucket = first_bucket
         try:
             while 1:
                 bucket = next(iterator)
                 if future.done():
                     res = future.result(timeout=0)
                     future = self._prefetch_bucket(bucket)
+                    future_bucket = bucket
                     yield res
                 else:
                     yield self._read_bucket(bucket)
         except StopIteration:
             pass
-        yield future.result(timeout=10)
+        try:
+            yield future.result(timeout=60)
+        except TimeoutError as e:
+            print("ignoring timeout when reading", future_bucket, e, file=sys.stderr)
+
+    def _bucket_iter(self, directory: Path) -> Iterable[Path]:
+        for f in list(directory.iterdir()):
+            if f.suffix == ".bin":
+                yield f
 
     def _write_bucket(self, bucket: Path, trials: list[StaleTrial]) -> None:
         with self._bucket_lock(bucket):
@@ -167,14 +203,14 @@ class BucketFileStorage(Sink, Source):
 
     def _get_trials_from_base(self, base: Path) -> Iterable[StaleTrial]:
         for mangle in base.iterdir():
-            for read_bucket in self._prefetching_bucket_iter(mangle.iterdir()):
+            for read_bucket in self._prefetching_bucket_iter(mangle):
                 yield from read_bucket
 
     def _get_trials_with_tag(self, tag: str, base: Path) -> Iterable[StaleTrial]:
         mangled_tag = self._tag_mangle(tag)
         for mangle in base.iterdir():
             if mangled_tag in mangle.name:
-                for read_bucket in self._prefetching_bucket_iter(mangle.iterdir()):
+                for read_bucket in self._prefetching_bucket_iter(mangle):
                     for trial in read_bucket:
                         if tag in trial.tags:
                             yield trial
@@ -294,6 +330,7 @@ class CSVSink(Sink):
                 "result",
                 "error",
                 "prune_reason",
+                "vars",
                 "trace",
             ]
         )
@@ -301,6 +338,25 @@ class CSVSink(Sink):
     @staticmethod
     def _format_trace(trial: Trial, key: str) -> str:
         return repr(list(trial.trace_all(key)))
+
+    def _jsonize(self, x: Any) -> dict | list | str | int | float | bool | None:
+        if isinstance(x, numbers.Integral):
+            return int(x)
+        elif isinstance(x, FLOAT_TYPES):
+            return float(x)
+        elif isinstance(x, (list, tuple, set)):
+            return [self._jsonize(y) for y in x]
+        elif isinstance(x, dict):
+            return {str(self._jsonize(k)): self._jsonize(v) for k, v in x.items()}
+        elif isinstance(x, str):
+            return str(x)
+        elif isinstance(x, bytes):
+            return x.decode("utf-8")
+        elif x is None:
+            return None
+        elif isinstance(x, bool):
+            return bool(x)
+        return repr(x)
 
     def put_trials(self, trials: Sequence[Trial]) -> None:
         """Write a sequence of trials to the CSV stream.
@@ -314,10 +370,10 @@ class CSVSink(Sink):
                 [
                     s.uuid,
                     s.optuna_trial_number,
-                    ";".join(s.tags),
-                    ";".join(r.step.name for r in s.step_records),
-                    ";".join(r.start.isoformat() for r in s.step_records),
-                    ";".join(r.end.isoformat() for r in s.step_records),
+                    json.dumps(list(s.tags)),
+                    json.dumps([r.step.name for r in s.step_records]),
+                    json.dumps([r.start.isoformat() for r in s.step_records]),
+                    json.dumps([r.end.isoformat() for r in s.step_records]),
                     repr(s.result.result)
                     if s.result is not None and s.result.result is not None
                     else "",
@@ -327,8 +383,12 @@ class CSVSink(Sink):
                     repr(s.result.prune_reason)
                     if s.result is not None and s.result.prune_reason is not None
                     else "",
-                    ";".join(
-                        f"{key}:{self._format_trace(s, key)}" for key in s.trace_keys()
+                    json.dumps(s.v._variables_dict),
+                    json.dumps(
+                        {
+                            key: [self._jsonize(x) for x in s.trace_all(key)]
+                            for key in s.trace_keys()
+                        }
                     ),
                 ]
                 for s in stales

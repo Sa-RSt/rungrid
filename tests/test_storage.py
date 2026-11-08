@@ -1,6 +1,7 @@
 import csv
 import datetime
 import io
+import json
 from uuid import uuid4
 
 import pytest
@@ -30,8 +31,10 @@ def test_csv_sink():
     row = lines[1]
     assert str(trial.uuid) in row
     assert "42" in row
-    # tags should be semicolon separated inside CSV
-    assert "tag1;tag2" in row or "tag2;tag1" in row
+    assert (
+        json.dumps(["tag1", "tag2"]).replace('"', '""') in row
+        or json.dumps(["tag2", "tag1"]).replace('"', '""') in row
+    )
 
 
 def test_csv_sink_saves_trial_traces():
@@ -55,12 +58,10 @@ def test_csv_sink_saves_trial_traces():
     trace_idx = header.index("trace")
     trace_col = row[trace_idx]
 
-    expected_loss = "loss:[(0.5, {'epoch': 1}), (0.25, {'epoch': 2})]"
-    expected_acc = "accuracy:[(0.95, {})]"
-
-    assert expected_loss in trace_col
-    assert expected_acc in trace_col
-    assert trace_col == f"{expected_loss};{expected_acc}" or trace_col == f"{expected_acc};{expected_loss}"
+    assert json.loads(trace_col) == {
+        "loss": [[0.5, {"epoch": 1}], [0.25, {"epoch": 2}]],
+        "accuracy": [[0.95, {}]],
+    }
 
 
 def test_bucket_file_storage(tmp_path):
