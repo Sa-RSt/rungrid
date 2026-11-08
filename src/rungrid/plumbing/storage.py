@@ -205,13 +205,15 @@ class BucketFileStorage(Sink, Source):
 
     def _get_trials_from_base(self, base: Path) -> Iterable[StaleTrial]:
         for mangle in base.iterdir():
+            if not mangle.is_dir():
+                continue
             for read_bucket in self._prefetching_bucket_iter(mangle):
                 yield from read_bucket
 
     def _get_trials_with_tag(self, tag: str, base: Path) -> Iterable[StaleTrial]:
         mangled_tag = self._tag_mangle(tag)
         for mangle in base.iterdir():
-            if mangled_tag in mangle.name:
+            if mangle.is_dir() and mangled_tag in mangle.name:
                 for read_bucket in self._prefetching_bucket_iter(mangle):
                     for trial in read_bucket:
                         if tag in trial.tags:
